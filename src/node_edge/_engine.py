@@ -13,10 +13,11 @@ from typing import Any, Mapping, Optional, TextIO
 
 from xdg import xdg_state_home
 
-from ._exceptions import NodeEdgeException
+from .exceptions import *
 
 __all__ = [
     "NodeEngine",
+    "JavaScriptPointer",
 ]
 
 
@@ -60,32 +61,34 @@ class Eval:
     error: Optional[Mapping] = None
 
 
+@dataclass
+class Await:
+    """
+    An await request + response/exception
+    """
+
+    pointer_id: int
+    event: Event
+    success: Optional[bool] = None
+    result: Optional[Any] = None
+    error: Optional[Mapping] = None
+
+
 class Finish:
     """
     A finish request, that closes the engine
     """
 
 
-class JavaScriptError(Exception):
+@dataclass
+class JavaScriptPointer:
     """
-    Forwarded from the JS side, replicating the JS Error object as closely
-    as possible
+    A pointer to a JavaScript object
     """
 
-    def __init__(
-        self, message: str = "unknown error", stack: str = "", **extra
-    ) -> None:
-        self.message = message
-        self.stack = stack
-        self.extra = extra
-
-    def __str__(self):
-        """
-        Try to replicate the JS Error object as closely as possible and have
-        a nice render
-        """
-
-        return f"{self.message}:\n{self.stack}"
+    id: int
+    awaitable: bool
+    repr: str
 
 
 class NodeEngine:
@@ -328,6 +331,33 @@ class NodeEngine:
                         pending_event.success = False
                         pending_event.error = payload["error"]
                         pending_event.event.set()
+                case Await(pointer_id=pointer_id):
+                    self._pending[str(id(evt))] = evt
+                    self._await(event_id=id(evt), pointer_id=pointer_id)
+                case RemoteMessage(
+                    content={
+                        "type": "await_result",
+                        "payload": payload,
+                        "event_id": event_id,
+                    }
+                ):
+                    if event_id in self._pending:
+                        pending_event = self._pending.pop(event_id)
+                        pending_event.success = True
+                        pending_event.result = payload["result"]
+                        pending_event.event.set()
+                case RemoteMessage(
+                    content={
+                        "type": "await_error",
+                        "payload": payload,
+                        "event_id": event_id,
+                    }
+                ):
+                    if event_id in self._pending:
+                        pending_event = self._pending.pop(event_id)
+                        pending_event.success = False
+                        pending_event.error = payload["error"]
+                        pending_event.event.set()
                 case _:
                     print(evt)
 
@@ -476,6 +506,20 @@ class NodeEngine:
 
         self._events.put(Finish())
 
+    def _final_value(self, msg):
+        """
+        The JS side can either return a JSON-serializable value, or a pointer
+        to a value. This will automatically either return the value or wrap
+        the pointer in a JavaScriptPointer object. The JavaScriptPointer is
+        supposed to be transparent for use as a Python object and will proxy
+        all the calls to the remote process.
+        """
+
+        if msg["type"] == "pointer":
+            return JavaScriptPointer(msg["id"], msg["awaitable"], msg["repr"])
+        elif msg["type"] == "naive":
+            return msg["data"]
+
     def eval(self, code: str) -> Any:
         """
         Synchronously evaluates some code in the remote process and returns the
@@ -494,7 +538,7 @@ class NodeEngine:
         msg.event.wait()
 
         if msg.success:
-            return msg.result
+            return self._final_value(msg.result)
         else:
             raise JavaScriptError(**msg.error)
 
@@ -517,6 +561,56 @@ class NodeEngine:
                 payload=dict(
                     event_id=f"{event_id}",
                     code=code,
+                ),
+            )
+        )
+
+    def await_(self, pointer: JavaScriptPointer) -> Any:
+        """
+        Synchronously awaits a JavaScript pointer and returns the value.
+
+        It will block the thread until the result is available.
+
+        Parameters
+        ----------
+        pointer
+            The pointer to await
+        """
+
+        if not isinstance(pointer, JavaScriptPointer):
+            raise TypeError("Pointer must be a JavaScriptPointer")
+
+        if not pointer.awaitable:
+            raise NodeEdgeValueError("Cannot await a non-awaitable pointer")
+
+        msg = Await(pointer.id, Event())
+        self._events.put(msg)
+        msg.event.wait()
+
+        if msg.success:
+            return self._final_value(msg.result)
+        else:
+            raise JavaScriptError(**msg.error)
+
+    def _await(self, event_id: int, pointer_id: str) -> None:
+        """
+        Underlying implementation of the await_() method, which will run in the
+        events loop's thread.
+
+        Parameters
+        ----------
+        event_id
+            The ID of the event
+        pointer_id
+            The ID of the pointer to await
+        """
+
+        self._send_message(
+            dict(
+                type="await",
+                payload=dict(
+                    event_id=f"{event_id}",
+                    pointer_id=pointer_id,
                 ),
             )
         )

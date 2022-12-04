@@ -10,4 +10,5 @@ ne = NodeEngine(
 )
 
 with ne:
-    print(ne.eval("2 + 2"))
+    ptr = ne.eval("new Promise((resolve, reject) => { resolve([1, 2, 3]) })")
+    print(ne.await_(ptr))

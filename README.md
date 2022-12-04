@@ -10,12 +10,10 @@ package = {
     "dependencies": {
         "axios": "^1.2.0",
     },
-    "type": "module",
 }
 
-with NodeEngine(package, sync=True) as n:
-    with n.context() as ctx:
-        axios = ctx.import_from('axios')
-        data = axios.get('https://httpbin.org/robots.txt').data
-        print(data)
+with NodeEngine(package) as n:
+    axios = n.import_from('axios')
+    data = axios.get('https://httpbin.org/robots.txt').data
+    print(data)
 ```
