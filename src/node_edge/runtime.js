@@ -143,6 +143,7 @@ class Executor {
                 type: "pointer",
                 id,
                 awaitable: isAwaitable(obj),
+                array: Array.isArray(obj),
                 repr: repr(obj),
             };
         }
@@ -169,6 +170,31 @@ class Executor {
             );
         }
     }
+}
+
+/**
+ * Resolving the [] operator is different depending whether we're dealing with
+ * an array or an object. Also we want to detect cases that JS ignores, like
+ * key errors and out of bound indices.
+ *
+ * The output of this matches the CallOutput on the Python side.
+ *
+ * @param obj Object to probe
+ * @param prop Key to check
+ * @returns {{type: string}|{result: *, type: string}}
+ */
+function getProp(obj, prop) {
+    if (Array.isArray(obj)) {
+        if (obj.length - 1 > prop) {
+            return { type: "out_of_bounds" };
+        }
+    } else {
+        if (!obj.hasOwnProperty(prop)) {
+            return { type: "no_such_property" };
+        }
+    }
+
+    return { type: "success", result: obj[prop] };
 }
 
 class Handler {
@@ -310,12 +336,40 @@ class Handler {
         const pointer = this.executor.pointers[pointer_id];
         const resolvedArgs = this.executor.deepResolve(args);
         let result;
+        let type = "success";
 
         try {
             if (call_type === "func") {
                 result = pointer(...resolvedArgs);
             } else if (call_type === "prop") {
-                result = pointer[resolvedArgs[0]];
+                const prop = getProp(pointer, resolvedArgs[0]);
+                result = prop.result;
+                type = prop.type;
+            } else if (call_type === "prop_count") {
+                if (Array.isArray(pointer)) {
+                    result = pointer.length;
+                } else {
+                    result = Object.keys(pointer).length;
+                }
+            } else if (call_type === "prop_set") {
+                const [key, value] = resolvedArgs;
+                pointer[key] = value;
+            } else if (call_type === "prop_del") {
+                delete pointer[resolvedArgs[0]];
+            } else if (call_type === "prop_list") {
+                if (Array.isArray(pointer)) {
+                    result = pointer;
+                } else {
+                    result = Object.keys(pointer);
+                }
+            } else if (call_type === "item_insert") {
+                if (!Array.isArray(pointer)) {
+                    // noinspection ExceptionCaughtLocallyJS
+                    throw new Error("Can only insert into arrays");
+                }
+
+                const [index, value] = resolvedArgs;
+                pointer.splice(index, 0, value);
             } else {
                 // noinspection ExceptionCaughtLocallyJS
                 throw new Error(`Unknown call type ${call_type}`);
@@ -338,6 +392,7 @@ class Handler {
                     type: "call_result",
                     payload: {
                         result: this.executor.toPointer(result),
+                        type,
                     },
                 });
             })

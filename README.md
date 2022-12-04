@@ -13,7 +13,7 @@ package = {
 }
 
 
-with NodeEngine(package, debug=True) as ne:
+with NodeEngine(package) as ne:
     axios = ne.import_from("axios")
     print(axios.get("https://httpbin.org/robots.txt").data)
 ```

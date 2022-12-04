@@ -1,4 +1,4 @@
-from node_edge import NodeEngine
+from node_edge import NodeEngine, as_mapping
 
 package = {
     "dependencies": {
@@ -7,6 +7,8 @@ package = {
 }
 
 
-with NodeEngine(package, debug=True) as ne:
+with NodeEngine(package, debug=False) as ne:
     axios = ne.import_from("axios")
-    print(axios.get("https://httpbin.org/robots.txt").data)
+    resp = axios.get("https://httpbin.org/get")
+    print(resp.data)
+    print({**as_mapping(resp.headers)})

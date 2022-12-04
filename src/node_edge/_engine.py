@@ -10,7 +10,19 @@ from selectors import EVENT_READ, DefaultSelector
 from subprocess import DEVNULL, PIPE, Popen
 from tempfile import gettempdir
 from threading import Event, Thread
-from typing import Any, List, Mapping, Optional, Sequence, TextIO
+from typing import (
+    Any,
+    Iterator,
+    List,
+    Mapping,
+    MutableMapping,
+    MutableSequence,
+    Optional,
+    Sequence,
+    TextIO,
+    TypeVar,
+    Union,
+)
 
 from xdg import xdg_state_home
 
@@ -19,6 +31,7 @@ from .exceptions import *
 __all__ = [
     "NodeEngine",
     "JavaScriptPointer",
+    "as_mapping",
 ]
 
 
@@ -98,6 +111,11 @@ class CallType(Enum):
 
     func = "func"
     prop = "prop"
+    prop_count = "prop_count"
+    prop_set = "prop_set"
+    prop_del = "prop_del"
+    prop_list = "prop_list"
+    item_insert = "item_insert"
 
 
 @dataclass
@@ -112,7 +130,23 @@ class Call:
     event: Event
     success: Optional[bool] = None
     result: Optional[Any] = None
+    result_type: Optional[str] = None
     error: Optional[Mapping] = None
+
+
+@dataclass
+class CallOutput:
+    """
+    Output of a JS "call". We need the "type" field because the "result" might
+    nor not be a pointer to the JS side while the type informs us on things
+    that are not necessarily an exception (like out of bounds index) but also
+    are not the normal result. We could have decided to do it JS-style and
+    return undefined whenever but the goal here is to make those JS objects
+    feel as pythonic as possible.
+    """
+
+    result: Any
+    type: str
 
 
 class Finish:
@@ -129,22 +163,203 @@ class JavaScriptPointer:
 
     id: int
     awaitable: bool
+    array: bool
     repr: str
     engine: "NodeEngine"
 
-    def __call__(self, *args: Any) -> Any:
+    @property
+    def proxy(self) -> Union["JavaScriptProxy", "JavaScriptArrayProxy"]:
         """
-        Call the function
+        JS is mixing up arrays, mappings and objects. Well Python isn't so we
+        kind of need to deal with that.
+
+        There are several things to consider:
+
+        - If the data was a simple structure, it would have been serialized
+          as JSON and we wouldn't be in a proxy (so the "mapping" case rarely
+          exists at this point)
+        - We know if it's an array because JS tells us
+        - By default we're dealing with an object-ish
+
+        There are 3 proxies that exist, we only return the array or the object
+        one here. The mapping one can be obtained using the as_mapping()
+        function.
         """
 
-        return self.engine.call(self, args, CallType.func)
+        if self.array:
+            return JavaScriptArrayProxy(self)
+        else:
+            return JavaScriptProxy(self)
 
-    def __getattr__(self, name: str) -> Any:
-        """
-        Get a property
-        """
 
-        return self.engine.call(self, [name], CallType.prop)
+T = TypeVar("T")
+K = TypeVar("K")
+V = TypeVar("V")
+
+
+class JavaScriptArrayProxy(MutableSequence[T]):
+    """
+    Proxies all the mutable sequence interface calls into poking in the JS
+    engine.
+    """
+
+    def __init__(self, pointer: JavaScriptPointer) -> None:
+        self.__dict__["__pointer__"] = pointer
+
+    def __repr__(self):
+        r = self.__dict__["__pointer__"].repr
+        return f"<JavaScriptArrayProxy {r}>"
+
+    def insert(self, index: int, value: T) -> None:
+        self.__dict__["__pointer__"].engine.call(
+            self, [index, value], CallType.item_insert
+        )
+
+    def __getitem__(self, index: int) -> T:
+        item = self.__dict__["__pointer__"].engine.call(self, [index], CallType.prop)
+
+        if item.type != "success":
+            raise IndexError(f"Index {index} out of range")
+
+        return item.result
+
+    def __setitem__(self, index: int, value: T) -> None:
+        self.__dict__["__pointer__"].engine.call(
+            self, [index, value], CallType.prop_set
+        )
+
+    def __delitem__(self, index: int) -> None:
+        self.__dict__["__pointer__"].engine.call(self, [index], CallType.prop_del)
+
+    def __len__(self) -> int:
+        return (
+            self.__dict__["__pointer__"]
+            .engine.call(self, [], CallType.prop_count)
+            .result
+        )
+
+
+class JavaScriptMappingProxy(MutableMapping[K, V]):
+    """
+    Proxies all the mutable mapping interface calls into poking in the remote
+    JS engine.
+    """
+
+    def __init__(self, pointer: JavaScriptPointer) -> None:
+        self.__dict__["__pointer__"] = pointer
+
+    def __repr__(self):
+        r = self.__dict__["__pointer__"].repr
+        return f"<JavaScriptMappingProxy {r}>"
+
+    def __setitem__(self, key: K, value: V) -> None:
+        self.__dict__["__pointer__"].engine.call(self, [key, value], CallType.prop_set)
+
+    def __delitem__(self, key: K) -> None:
+        self.__dict__["__pointer__"].engine.call(self, [key], CallType.prop_del)
+
+    def __getitem__(self, key: K) -> V:
+        item = self.__dict__["__pointer__"].engine.call(self, [key], CallType.prop)
+
+        if item.type != "success":
+            raise KeyError(f"Key {key} not found")
+
+        return item.result
+
+    def __len__(self) -> int:
+        return (
+            self.__dict__["__pointer__"]
+            .engine.call(self, [], CallType.prop_count)
+            .result
+        )
+
+    def __iter__(self) -> Iterator[K]:
+        yield from self.__dict__["__pointer__"].engine.call(
+            self, [], CallType.prop_list
+        ).result
+
+
+class JavaScriptProxy:
+    """
+    Behaves more or less like a JS object. Not really a mapping although
+    you can call __getitem__, which is identical to __getattr__. All calls
+    are proxied to the JS side, including calls to __call__.
+    """
+
+    def __init__(self, pointer: JavaScriptPointer) -> None:
+        self.__dict__["__pointer__"] = pointer
+
+    def __repr__(self):
+        r = self.__dict__["__pointer__"].repr
+        return f'<JavaScriptProxy {r}>'
+
+    def __getattr__(self, item):
+        attr = self.__dict__["__pointer__"].engine.call(self, [item], CallType.prop)
+
+        if attr.type != "success":
+            raise AttributeError(f"Attribute {item} not found")
+
+        return attr.result
+
+    def __getitem__(self, item):
+        val = self.__dict__["__pointer__"].engine.call(self, [item], CallType.prop)
+
+        if val.type != "success":
+            raise KeyError(f"Key {item} not found")
+
+        return val.result
+
+    def __setattr__(self, key, value):
+        self.__dict__["__pointer__"].engine.call(self, [key, value], CallType.prop_set)
+
+    def __delattr__(self, item):
+        self.__dict__["__pointer__"].engine.call(self, [item], CallType.prop_del)
+
+    def __call__(self, *args, **kwargs):
+        return (
+            self.__dict__["__pointer__"].engine.call(self, args, CallType.func).result
+        )
+
+
+def as_mapping(
+    obj: Union[JavaScriptPointer, JavaScriptProxy]
+) -> JavaScriptMappingProxy:
+    """
+    Converts the pointer (or another proxy) into a mapping proxy, in case you
+    want a full dictionary interface in your JS object.
+    """
+
+    if isinstance(obj, JavaScriptPointer):
+        return JavaScriptMappingProxy(obj)
+    elif isinstance(obj, JavaScriptProxy):
+        return JavaScriptMappingProxy(obj.__dict__["__pointer__"])
+    else:
+        raise TypeError("Object must be a JavaScriptPointer or JavaScriptProxy")
+
+
+PointerIsh = Union[
+    JavaScriptPointer,
+    JavaScriptProxy,
+    JavaScriptArrayProxy,
+    JavaScriptMappingProxy,
+]
+
+
+def _get_pointer(pointer: PointerIsh) -> JavaScriptPointer:
+    """
+    Get the pointer from a proxy
+    """
+
+    if isinstance(pointer, JavaScriptPointer):
+        return pointer
+    elif isinstance(
+        pointer, (JavaScriptArrayProxy, JavaScriptProxy, JavaScriptMappingProxy)
+    ):
+        return pointer.__dict__["__pointer__"]
+    else:
+        raise NodeEdgeTypeError(
+            "pointer must be a JavaScriptPointer or JavaScriptProxy"
+        )
 
 
 def _deep_point(obj):
@@ -156,6 +371,8 @@ def _deep_point(obj):
 
     if isinstance(obj, JavaScriptPointer):
         return dict(type="pointer", id=obj.id)
+    elif isinstance(obj, (JavaScriptArrayProxy, JavaScriptProxy)):
+        return dict(type="pointer", id=obj.__dict__["__pointer__"].id)
     elif isinstance(obj, (str, bytes, bytearray, int, float, bool)):
         return dict(type="flat", data=obj)
     elif isinstance(obj, Sequence):
@@ -479,6 +696,7 @@ class NodeEngine:
                         pending_event = self._pending.pop(event_id)
                         pending_event.success = True
                         pending_event.result = payload["result"]
+                        pending_event.result_type = payload["type"]
                         pending_event.event.set()
                 case RemoteMessage(
                     content={
@@ -651,11 +869,12 @@ class NodeEngine:
 
         if msg["type"] == "pointer":
             return JavaScriptPointer(
-                msg["id"],
-                msg["awaitable"],
-                msg["repr"],
-                self,
-            )
+                id=msg["id"],
+                awaitable=msg["awaitable"],
+                repr=msg["repr"],
+                array=msg["array"],
+                engine=self,
+            ).proxy
         elif msg["type"] == "naive":
             return msg["data"]
 
@@ -704,7 +923,7 @@ class NodeEngine:
             )
         )
 
-    def await_(self, pointer: JavaScriptPointer) -> Any:
+    def await_(self, pointer: PointerIsh) -> Any:
         """
         Synchronously awaits a JavaScript pointer and returns the value.
 
@@ -716,8 +935,7 @@ class NodeEngine:
             The pointer to await
         """
 
-        if not isinstance(pointer, JavaScriptPointer):
-            raise TypeError("Pointer must be a JavaScriptPointer")
+        pointer = _get_pointer(pointer)
 
         if not pointer.awaitable:
             raise NodeEdgeValueError("Cannot await a non-awaitable pointer")
@@ -788,8 +1006,8 @@ class NodeEngine:
         )
 
     def call(
-        self, pointer: JavaScriptPointer, args: Sequence[Any], call_type: CallType
-    ) -> Any:
+        self, pointer: PointerIsh, args: Sequence[Any], call_type: CallType
+    ) -> CallOutput:
         """
         Calls a method on a pointer and returns the result.
 
@@ -805,8 +1023,7 @@ class NodeEngine:
             The type of call to make
         """
 
-        if not isinstance(pointer, JavaScriptPointer):
-            raise TypeError("Pointer must be a JavaScriptPointer")
+        pointer = _get_pointer(pointer)
 
         clean_args: List[Any] = _deep_point(args)  # noqa
         msg = Call(pointer.id, clean_args, call_type, Event())
@@ -814,7 +1031,10 @@ class NodeEngine:
         msg.event.wait()
 
         if msg.success:
-            return self._final_value(msg.result)
+            return CallOutput(
+                result=self._final_value(msg.result),
+                type=msg.result_type,
+            )
         else:
             raise JavaScriptError(**msg.error)
 
