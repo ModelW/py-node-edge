@@ -1,6 +1,7 @@
 import json
 import socket
 from dataclasses import dataclass
+from enum import Enum
 from hashlib import sha256
 from itertools import chain
 from pathlib import Path
@@ -9,7 +10,7 @@ from selectors import EVENT_READ, DefaultSelector
 from subprocess import DEVNULL, PIPE, Popen
 from tempfile import gettempdir
 from threading import Event, Thread
-from typing import Any, Mapping, Optional, TextIO
+from typing import Any, List, Mapping, Optional, Sequence, TextIO
 
 from xdg import xdg_state_home
 
@@ -88,6 +89,32 @@ class Import:
     error: Optional[Mapping] = None
 
 
+class CallType(Enum):
+    """
+    Because of the conceptual similarity, both calling a function or accessing
+    an index are the same message. If the type os func then it'll do
+    obj(*args) and otherwise it'll do obj[args[0]].
+    """
+
+    func = "func"
+    prop = "prop"
+
+
+@dataclass
+class Call:
+    """
+    A request to "call" on the pointed object
+    """
+
+    pointer_id: int
+    args: List[Any]
+    type: CallType
+    event: Event
+    success: Optional[bool] = None
+    result: Optional[Any] = None
+    error: Optional[Mapping] = None
+
+
 class Finish:
     """
     A finish request, that closes the engine
@@ -103,6 +130,40 @@ class JavaScriptPointer:
     id: int
     awaitable: bool
     repr: str
+    engine: "NodeEngine"
+
+    def __call__(self, *args: Any) -> Any:
+        """
+        Call the function
+        """
+
+        return self.engine.call(self, args, CallType.func)
+
+    def __getattr__(self, name: str) -> Any:
+        """
+        Get a property
+        """
+
+        return self.engine.call(self, [name], CallType.prop)
+
+
+def _deep_point(obj):
+    """
+    In order to be able to make calls, we need to be able to pass arguments.
+    This will convert a JSON-serializable structure into something a bit more
+    verbose but which allows to have references to JS pointers.
+    """
+
+    if isinstance(obj, JavaScriptPointer):
+        return dict(type="pointer", id=obj.id)
+    elif isinstance(obj, (str, bytes, bytearray, int, float, bool)):
+        return dict(type="flat", data=obj)
+    elif isinstance(obj, Sequence):
+        return dict(type="sequence", data=[_deep_point(i) for i in obj])
+    elif isinstance(obj, Mapping):
+        return dict(type="mapping", data={k: _deep_point(v) for k, v in obj.items()})
+    else:
+        raise NodeEdgeTypeError(f"Cannot serialize {type(obj)}")
 
 
 class NodeEngine:
@@ -399,6 +460,38 @@ class NodeEngine:
                         pending_event.success = False
                         pending_event.error = payload["error"]
                         pending_event.event.set()
+                case Call(pointer_id=pointer_id, args=args, type=type_):
+                    self._pending[str(id(evt))] = evt
+                    self._call(
+                        pointer_id=pointer_id,
+                        args=args,
+                        call_type=type_,
+                        event_id=id(evt),
+                    )
+                case RemoteMessage(
+                    content={
+                        "type": "call_result",
+                        "payload": payload,
+                        "event_id": event_id,
+                    }
+                ):
+                    if event_id in self._pending:
+                        pending_event = self._pending.pop(event_id)
+                        pending_event.success = True
+                        pending_event.result = payload["result"]
+                        pending_event.event.set()
+                case RemoteMessage(
+                    content={
+                        "type": "call_error",
+                        "payload": payload,
+                        "event_id": event_id,
+                    }
+                ):
+                    if event_id in self._pending:
+                        pending_event = self._pending.pop(event_id)
+                        pending_event.success = False
+                        pending_event.error = payload["error"]
+                        pending_event.event.set()
                 case _:
                     print(evt)
 
@@ -557,7 +650,12 @@ class NodeEngine:
         """
 
         if msg["type"] == "pointer":
-            return JavaScriptPointer(msg["id"], msg["awaitable"], msg["repr"])
+            return JavaScriptPointer(
+                msg["id"],
+                msg["awaitable"],
+                msg["repr"],
+                self,
+            )
         elif msg["type"] == "naive":
             return msg["data"]
 
@@ -656,7 +754,7 @@ class NodeEngine:
             )
         )
 
-    def import_from(self, module: str, name: str = 'default') -> Any:
+    def import_from(self, module: str, name: str = "default") -> Any:
         """
         Imports a name from a JS module (by default, "default") and returns
         a pointer ot that object. Which then allows you to call its methods
@@ -685,6 +783,57 @@ class NodeEngine:
                     event_id=f"{event_id}",
                     module=module,
                     name=name,
+                ),
+            )
+        )
+
+    def call(
+        self, pointer: JavaScriptPointer, args: Sequence[Any], call_type: CallType
+    ) -> Any:
+        """
+        Calls a method on a pointer and returns the result.
+
+        It will block the thread until the result is available.
+
+        Parameters
+        ----------
+        pointer
+            The pointer to call
+        args
+            The arguments to pass to the method
+        call_type
+            The type of call to make
+        """
+
+        if not isinstance(pointer, JavaScriptPointer):
+            raise TypeError("Pointer must be a JavaScriptPointer")
+
+        clean_args: List[Any] = _deep_point(args)  # noqa
+        msg = Call(pointer.id, clean_args, call_type, Event())
+        self._events.put(msg)
+        msg.event.wait()
+
+        if msg.success:
+            return self._final_value(msg.result)
+        else:
+            raise JavaScriptError(**msg.error)
+
+    def _call(
+        self, pointer_id: str, args: List[Any], call_type: CallType, event_id: int
+    ) -> None:
+        """
+        Sending the call message to the other side (running here to be in the
+        right thread)
+        """
+
+        self._send_message(
+            dict(
+                type="call",
+                payload=dict(
+                    event_id=f"{event_id}",
+                    pointer_id=pointer_id,
+                    args=args,
+                    call_type=call_type.value,
                 ),
             )
         )

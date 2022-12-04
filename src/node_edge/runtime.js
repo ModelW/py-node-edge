@@ -147,6 +147,28 @@ class Executor {
             };
         }
     }
+
+    /**
+     * Counterpart of Python's _deep_point() method, which will convert the
+     * input from Python into a JS object, including by resolving references
+     * to pointers.
+     */
+    deepResolve(obj) {
+        if (obj.type === "pointer") {
+            return this.pointers[obj.id];
+        } else if (obj.type === "flat") {
+            return obj.data;
+        } else if (obj.type === "sequence") {
+            return obj.data.map((item) => this.deepResolve(item));
+        } else if (obj.type === "mapping") {
+            return Object.fromEntries(
+                Object.entries(obj).map(([key, value]) => [
+                    key,
+                    this.deepResolve(value),
+                ])
+            );
+        }
+    }
 }
 
 class Handler {
@@ -271,6 +293,66 @@ class Handler {
     }
 
     /**
+     * Handles a call
+     *
+     * Basically doing foo() and doing foo[] is almost the same thing so we do
+     * both here depending on what we're being asked.
+     *
+     * The result is automatically awaited if needs to be. In the future there
+     * might be options to disable this but for now it's quite easier like that.
+     *
+     * @param {string} event_id
+     * @param {number} pointer_id
+     * @param {Array<any>} args
+     * @param {string} call_type
+     */
+    handleCall({ event_id, pointer_id, args, call_type }) {
+        const pointer = this.executor.pointers[pointer_id];
+        const resolvedArgs = this.executor.deepResolve(args);
+        let result;
+
+        try {
+            if (call_type === "func") {
+                result = pointer(...resolvedArgs);
+            } else if (call_type === "prop") {
+                result = pointer[resolvedArgs[0]];
+            } else {
+                // noinspection ExceptionCaughtLocallyJS
+                throw new Error(`Unknown call type ${call_type}`);
+            }
+        } catch (error) {
+            this.sendMessage({
+                event_id,
+                type: "call_error",
+                payload: {
+                    error: this.serializeError(error),
+                },
+            });
+            return;
+        }
+
+        Promise.resolve(result)
+            .then((result) => {
+                this.sendMessage({
+                    event_id,
+                    type: "call_result",
+                    payload: {
+                        result: this.executor.toPointer(result),
+                    },
+                });
+            })
+            .catch((error) => {
+                this.sendMessage({
+                    event_id,
+                    type: "call_error",
+                    payload: {
+                        error: this.serializeError(error),
+                    },
+                });
+            });
+    }
+
+    /**
      * Handles a message from the Python side.
      *
      * @param {string} line A line of JSON
@@ -300,6 +382,8 @@ class Handler {
             this.handleAwait(event.payload);
         } else if (event.type === "import") {
             this.handleImport(event.payload);
+        } else if (event.type === "call") {
+            this.handleCall(event.payload);
         } else {
             throw Error("Unknown event type");
         }

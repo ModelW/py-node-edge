@@ -12,8 +12,8 @@ package = {
     },
 }
 
-with NodeEngine(package) as n:
-    axios = n.import_from('axios')
-    data = axios.get('https://httpbin.org/robots.txt').data
-    print(data)
+
+with NodeEngine(package, debug=True) as ne:
+    axios = ne.import_from("axios")
+    print(axios.get("https://httpbin.org/robots.txt").data)
 ```

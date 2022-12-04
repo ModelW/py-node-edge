@@ -1,6 +1,7 @@
 __all__ = [
     "NodeEdgeException",
     "NodeEdgeValueError",
+    "NodeEdgeTypeError",
     "JavaScriptError",
 ]
 
@@ -12,6 +13,10 @@ class NodeEdgeException(Exception):
 
 
 class NodeEdgeValueError(NodeEdgeException, ValueError):
+    pass
+
+
+class NodeEdgeTypeError(NodeEdgeException, TypeError):
     pass
 
 
