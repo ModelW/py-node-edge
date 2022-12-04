@@ -6,9 +6,10 @@ ne = NodeEngine(
             "axios": "^1.2.0",
         },
     },
-    debug=False,
+    debug=True,
 )
 
 with ne:
-    ptr = ne.eval("new Promise((resolve, reject) => { resolve([1, 2, 3]) })")
-    print(ne.await_(ptr))
+    axios = ne.import_from("axios")
+    print(axios)
+    # print(axios.get('https://httpbin.org/robots.txt').data)

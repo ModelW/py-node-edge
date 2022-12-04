@@ -74,6 +74,20 @@ class Await:
     error: Optional[Mapping] = None
 
 
+@dataclass
+class Import:
+    """
+    An import request + response/exception
+    """
+
+    module: str
+    name: str
+    event: Event
+    success: Optional[bool] = None
+    result: Optional[Any] = None
+    error: Optional[Mapping] = None
+
+
 class Finish:
     """
     A finish request, that closes the engine
@@ -358,6 +372,33 @@ class NodeEngine:
                         pending_event.success = False
                         pending_event.error = payload["error"]
                         pending_event.event.set()
+                case Import(module=module, name=name):
+                    self._pending[str(id(evt))] = evt
+                    self._import(event_id=id(evt), module=module, name=name)
+                case RemoteMessage(
+                    content={
+                        "type": "import_result",
+                        "payload": payload,
+                        "event_id": event_id,
+                    }
+                ):
+                    if event_id in self._pending:
+                        pending_event = self._pending.pop(event_id)
+                        pending_event.success = True
+                        pending_event.result = payload["result"]
+                        pending_event.event.set()
+                case RemoteMessage(
+                    content={
+                        "type": "import_error",
+                        "payload": payload,
+                        "event_id": event_id,
+                    }
+                ):
+                    if event_id in self._pending:
+                        pending_event = self._pending.pop(event_id)
+                        pending_event.success = False
+                        pending_event.error = payload["error"]
+                        pending_event.event.set()
                 case _:
                     print(evt)
 
@@ -611,6 +652,39 @@ class NodeEngine:
                 payload=dict(
                     event_id=f"{event_id}",
                     pointer_id=pointer_id,
+                ),
+            )
+        )
+
+    def import_from(self, module: str, name: str = 'default') -> Any:
+        """
+        Imports a name from a JS module (by default, "default") and returns
+        a pointer ot that object. Which then allows you to call its methods
+        etc.
+        """
+
+        msg = Import(module, name, Event())
+        self._events.put(msg)
+        msg.event.wait()
+
+        if msg.success:
+            return self._final_value(msg.result)
+        else:
+            raise JavaScriptError(**msg.error)
+
+    def _import(self, event_id: int, module: str, name: str) -> None:
+        """
+        Sending the import message to the other side (running here to be in the
+        right thread)
+        """
+
+        self._send_message(
+            dict(
+                type="import",
+                payload=dict(
+                    event_id=f"{event_id}",
+                    module=module,
+                    name=name,
                 ),
             )
         )

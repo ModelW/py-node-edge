@@ -66,7 +66,7 @@ function isNaiveObject(obj) {
  * @returns {boolean} True if the object is thennable, false otherwise
  */
 function isAwaitable(obj) {
-    return obj && typeof obj.then === "function";
+    return !!(obj && typeof obj.then === "function");
 }
 
 /**
@@ -242,6 +242,35 @@ class Handler {
     }
 
     /**
+     * Handles an import asked by Python and replies when it's resolved
+     *
+     * @param {string} event_id ID of the event that asked for the import
+     * @param {string} module Name of the module
+     * @param {string} name Name that we want from this module
+     */
+    handleImport({ event_id, module, name }) {
+        import(module)
+            .then((module) => {
+                this.sendMessage({
+                    event_id,
+                    type: "import_result",
+                    payload: {
+                        result: this.executor.toPointer(module[name]),
+                    },
+                });
+            })
+            .catch((error) => {
+                this.sendMessage({
+                    event_id,
+                    type: "import_error",
+                    payload: {
+                        error: this.serializeError(error),
+                    },
+                });
+            });
+    }
+
+    /**
      * Handles a message from the Python side.
      *
      * @param {string} line A line of JSON
@@ -269,6 +298,8 @@ class Handler {
             this.handleEval(event.payload);
         } else if (event.type === "await") {
             this.handleAwait(event.payload);
+        } else if (event.type === "import") {
+            this.handleImport(event.payload);
         } else {
             throw Error("Unknown event type");
         }
