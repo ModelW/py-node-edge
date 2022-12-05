@@ -17,3 +17,7 @@ with NodeEngine(package) as ne:
     axios = ne.import_from("axios")
     print(axios.get("https://httpbin.org/robots.txt").data)
 ```
+
+## Documentation
+
+[✨ **Documentation is there** ✨](https://node-edge.rtfd.io)

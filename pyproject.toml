@@ -8,6 +8,7 @@ readme = "README.md"
 packages = [{include = "node_edge", from = "src"}]
 repository = "https://github.com/ModelW/py-node-edge"
 homepage = "https://github.com/ModelW/py-node-edge"
+documentation = "https://node-edge.rtfd.io"
 
 keywords = ["node", "javascript", "binding"]
 
