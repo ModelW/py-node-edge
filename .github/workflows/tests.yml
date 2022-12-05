@@ -22,7 +22,6 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
       - name: Install dependencies
-        working-directory: demo
         run: |
           pip install --upgrade pip
           pip install poetry
