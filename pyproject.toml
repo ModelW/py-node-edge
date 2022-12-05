@@ -1,11 +1,15 @@
 [tool.poetry]
 name = "node-edge"
-version = "0.1.0"
+version = "0.1.0b1"
 description = "A tool to run Node code from Python"
 authors = ["Rémy Sanchez <remy.sanchez@hyperthese.net>"]
 license = "WTFPL"
 readme = "README.md"
 packages = [{include = "node_edge", from = "src"}]
+repository = "https://github.com/ModelW/py-node-edge"
+homepage = "https://github.com/ModelW/py-node-edge"
+
+keywords = ["node", "javascript", "binding"]
 
 [tool.poetry.dependencies]
 python = "^3.10"
