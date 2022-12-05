@@ -14,7 +14,7 @@ def test_wrong_dep():
 
 
 def test_fail_env_dir():
-    ne = NodeEngine({}, env_dir_candidates=['/foo/bar'])
+    ne = NodeEngine({}, env_dir_candidates=["/foo/bar"])
 
     with raises(NodeEdgeException):
         ne.create_env()
