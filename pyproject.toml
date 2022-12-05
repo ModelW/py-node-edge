@@ -11,11 +11,15 @@ packages = [{include = "node_edge", from = "src"}]
 python = "^3.10"
 xdg = "^5.1.1"
 
-
 [tool.poetry.group.dev.dependencies]
 black = "^22.10.0"
 isort = "^5.10.1"
 ipython = "^8.7.0"
+pytest = "^7.2.0"
+coverage = "^6.5.0"
+
+[tool.isort]
+profile = "black"
 
 [build-system]
 requires = ["poetry-core"]

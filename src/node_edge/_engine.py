@@ -32,6 +32,11 @@ __all__ = [
     "NodeEngine",
     "JavaScriptPointer",
     "as_mapping",
+    "JavaScriptPointer",
+    "JavaScriptProxy",
+    "JavaScriptArrayProxy",
+    "JavaScriptMappingProxy",
+    "PointerIsh",
 ]
 
 
@@ -291,7 +296,7 @@ class JavaScriptProxy:
 
     def __repr__(self):
         r = self.__dict__["__pointer__"].repr
-        return f'<JavaScriptProxy {r}>'
+        return f"<JavaScriptProxy {r}>"
 
     def __getattr__(self, item):
         attr = self.__dict__["__pointer__"].engine.call(self, [item], CallType.prop)
@@ -334,7 +339,7 @@ def as_mapping(
     elif isinstance(obj, JavaScriptProxy):
         return JavaScriptMappingProxy(obj.__dict__["__pointer__"])
     else:
-        raise TypeError("Object must be a JavaScriptPointer or JavaScriptProxy")
+        raise NodeEdgeTypeError("Object must be a JavaScriptPointer or JavaScriptProxy")
 
 
 PointerIsh = Union[
@@ -396,11 +401,17 @@ class NodeEngine:
         npm_bin: str = "npm",
         keep_lock: bool = True,
         debug: bool = False,
+        env_dir_candidates: Optional[Sequence[str | Path]] = None,
     ):
         self.package = package
         self.npm_bin = npm_bin
         self.debug = debug
         self.keep_lock = keep_lock
+        self.env_dir_candidates = (
+            [xdg_state_home(), Path(gettempdir())]
+            if env_dir_candidates is None
+            else [Path(i) for i in env_dir_candidates]
+        )
         self._env_dir = None
         self._listen_socket: Optional[socket.socket] = None
         self._remote_conn: Optional[socket.socket] = None
@@ -464,7 +475,7 @@ class NodeEngine:
         idea what to do, so I raise an exception.
         """
 
-        for candidate in [xdg_state_home(), Path(gettempdir())]:
+        for candidate in self.env_dir_candidates:
             full_path = candidate / "node_edge" / "envs" / self.package_signature
 
             if self._try_env_candidate(full_path):
@@ -710,8 +721,6 @@ class NodeEngine:
                         pending_event.success = False
                         pending_event.error = payload["error"]
                         pending_event.event.set()
-                case _:
-                    print(evt)
 
     def _run_listen_remote(self):
         """

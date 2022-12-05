@@ -163,7 +163,7 @@ class Executor {
             return obj.data.map((item) => this.deepResolve(item));
         } else if (obj.type === "mapping") {
             return Object.fromEntries(
-                Object.entries(obj).map(([key, value]) => [
+                Object.entries(obj.data).map(([key, value]) => [
                     key,
                     this.deepResolve(value),
                 ])
@@ -185,7 +185,7 @@ class Executor {
  */
 function getProp(obj, prop) {
     if (Array.isArray(obj)) {
-        if (obj.length - 1 > prop) {
+        if (prop > obj.length - 1) {
             return { type: "out_of_bounds" };
         }
     } else {
@@ -355,7 +355,11 @@ class Handler {
                 const [key, value] = resolvedArgs;
                 pointer[key] = value;
             } else if (call_type === "prop_del") {
-                delete pointer[resolvedArgs[0]];
+                if (Array.isArray(pointer)) {
+                    pointer.splice(resolvedArgs[0], 1);
+                } else {
+                    delete pointer[resolvedArgs[0]];
+                }
             } else if (call_type === "prop_list") {
                 if (Array.isArray(pointer)) {
                     result = pointer;
