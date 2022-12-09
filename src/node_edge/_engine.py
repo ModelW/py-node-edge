@@ -399,11 +399,13 @@ class NodeEngine:
         self,
         package: Mapping,
         npm_bin: str = "npm",
+        node_bin: str = "node",
         debug: bool = False,
         env_dir_candidates: Optional[Sequence[str | Path]] = None,
     ):
         self.package = package
         self.npm_bin = npm_bin
+        self.node_bin = node_bin
         self.debug = debug
         self.env_dir_candidates = (
             [xdg_state_home(), Path(gettempdir())]
@@ -835,7 +837,7 @@ class NodeEngine:
             )
 
         self._remote_proc = Popen(
-            args=[self.npm_bin, "run", "node_edge_runtime", "--", f"{port}"],
+            args=[self.node_bin, "./index.js", f"{port}"],
             cwd=root,
             **extra,
         )
