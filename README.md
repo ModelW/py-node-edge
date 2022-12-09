@@ -1,5 +1,8 @@
 # node-edge
 
+![Unit Tests](https://github.com/ModelW/py-node-edge/actions/workflows/tests.yml/badge.svg)
+![Documentation](https://readthedocs.org/projects/node-edge/badge/?version=latest)
+
 This tool allows you to run Node code from Python, including dependency
 management:
 

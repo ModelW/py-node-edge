@@ -399,14 +399,14 @@ class NodeEngine:
         self,
         package: Mapping,
         npm_bin: str = "npm",
-        keep_lock: bool = True,
+        node_bin: str = "node",
         debug: bool = False,
         env_dir_candidates: Optional[Sequence[str | Path]] = None,
     ):
         self.package = package
         self.npm_bin = npm_bin
+        self.node_bin = node_bin
         self.debug = debug
-        self.keep_lock = keep_lock
         self.env_dir_candidates = (
             [xdg_state_home(), Path(gettempdir())]
             if env_dir_candidates is None
@@ -507,9 +507,10 @@ class NodeEngine:
 
         root = self.ensure_env_dir()
 
-        self._write_package_json(root)
-        self._write_runtime(root)
-        self._npm_install(root)
+        if not (root / "index.js").exists():
+            self._write_package_json(root)
+            self._npm_install(root)
+            self._write_runtime(root)
 
         return root
 
@@ -566,17 +567,11 @@ class NodeEngine:
         """
         Runs NPM install in the environment directory.
 
-        Depending on the keep_lock option, the lock file will be discarded or
-        kept before running the install.
-
         Parameters
         ----------
         root
             The environment directory
         """
-
-        if not self.keep_lock:
-            (root / "package-lock.json").unlink(missing_ok=True)
 
         p = Popen(
             args=[self.npm_bin, "install"],
@@ -842,7 +837,7 @@ class NodeEngine:
             )
 
         self._remote_proc = Popen(
-            args=[self.npm_bin, "run", "node_edge_runtime", "--", f"{port}"],
+            args=[self.node_bin, "./index.js", f"{port}"],
             cwd=root,
             **extra,
         )

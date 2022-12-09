@@ -1,6 +1,5 @@
 from node_edge import __version__ as release
 
-
 # -- Project information -----------------------------------------------------
 
 project = "Node Edge"
