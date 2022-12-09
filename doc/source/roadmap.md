@@ -26,7 +26,7 @@ revision its specifications should get more precise.
         socket. It would make sens to protect the communication between Python
         and Node better to avoid having a local attacker "stealing" the socket.
 
-# 0.3
+## 0.3
 
 -   [ ] **Node binding instead of external process** &mdash; The initial
         implementation relies on Node being already installed on the system. It
@@ -36,18 +36,18 @@ revision its specifications should get more precise.
 -   [ ] **No more context manager** &mdash; We'll drop the requirement to be
         used through a context manager. All should be transparent.
 
-# 0.4
+## 0.4
 
 -   [ ] **Async support** &mdash; At this stage the requirements for an API will
         be well-understood. It will be the time to refactor everything and offer
         both a sync and an async API.
 
-# 0.5
+## 0.5
 
 -   [ ] **TypeScript-based typed proxies** &mdash; TypeScript packages should be
         accessible through generated proxies with valid type annotations.
 
-# 1.0
+## 1.0
 
 -   [ ] **Comprehensive documentation** &mdash; Any gaps in the documentation
         should be filled.
