@@ -9,7 +9,7 @@ revision its specifications should get more precise.
 
 -   [x] **Basic functionality** &mdash; Being able to run Node code from Python
         while getting dependencies installed automatically
--   [ ] **Not too slow boot time** &mdash; Implementation of basic functionality
+-   [x] **Not too slow boot time** &mdash; Implementation of basic functionality
         showed that the boot time is quite high (0.5s) which is impractical for
         many applications. This needs to go down.
 -   [ ] **Garbage collection** &mdash; When Python proxies get collected, the
