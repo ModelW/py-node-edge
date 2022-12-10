@@ -150,13 +150,24 @@ class Executor {
     }
 
     /**
+     * Returns the pointer only if it exists, raises an exception otherwise.
+     */
+    getPointer(pointerId) {
+        if (this.pointers.hasOwnProperty(pointerId)) {
+            return this.pointers[pointerId];
+        }
+
+        throw new Error(`Pointer ${pointerId} does not exist`);
+    }
+
+    /**
      * Counterpart of Python's _deep_point() method, which will convert the
      * input from Python into a JS object, including by resolving references
      * to pointers.
      */
     deepResolve(obj) {
         if (obj.type === "pointer") {
-            return this.pointers[obj.id];
+            return this.getPointer(obj.id);
         } else if (obj.type === "flat") {
             return obj.data;
         } else if (obj.type === "sequence") {
@@ -170,31 +181,19 @@ class Executor {
             );
         }
     }
-}
 
-/**
- * Resolving the [] operator is different depending whether we're dealing with
- * an array or an object. Also we want to detect cases that JS ignores, like
- * key errors and out of bound indices.
- *
- * The output of this matches the CallOutput on the Python side.
- *
- * @param obj Object to probe
- * @param prop Key to check
- * @returns {{type: string}|{result: *, type: string}}
- */
-function getProp(obj, prop) {
-    if (Array.isArray(obj)) {
-        if (prop > obj.length - 1) {
-            return { type: "out_of_bounds" };
-        }
-    } else {
-        if (!obj.hasOwnProperty(prop)) {
-            return { type: "no_such_property" };
+    /**
+     * Deletes references to the given pointer. This will allow GC to collect
+     * the associated object. This happens when the proxy is freed on Python
+     * side. If the pointer does not exist, do not do anything (could be a case
+     * of double call, which can happen in Python).
+     */
+    releasePointer(pointerId) {
+        if (this.pointers.hasOwnProperty(pointerId)) {
+            delete this.pointers[pointerId];
+            console.log(`Released pointer ${pointerId}`);
         }
     }
-
-    return { type: "success", result: obj[prop] };
 }
 
 class Handler {
@@ -333,18 +332,49 @@ class Handler {
      * @param {string} call_type
      */
     handleCall({ event_id, pointer_id, args, call_type }) {
-        const pointer = this.executor.pointers[pointer_id];
-        const resolvedArgs = this.executor.deepResolve(args);
         let result;
         let type = "success";
 
         try {
+            const pointer = this.executor.getPointer(pointer_id);
+            const resolvedArgs = this.executor.deepResolve(args);
+
             if (call_type === "func") {
-                result = pointer(...resolvedArgs);
-            } else if (call_type === "prop") {
-                const prop = getProp(pointer, resolvedArgs[0]);
-                result = prop.result;
-                type = prop.type;
+                const { args, auto_bind } = resolvedArgs;
+                result = pointer.call(auto_bind, ...args);
+            } else if (call_type === "entry") {
+                if (!Object.hasOwnProperty.call(pointer, resolvedArgs[0])) {
+                    type = "no_such_entry";
+                } else {
+                    result = pointer[resolvedArgs[0]];
+                }
+            } else if (call_type === "attr") {
+                try {
+                    if (!(resolvedArgs[0] in pointer)) {
+                        type = "no_such_property";
+                    } else {
+                        result = pointer[resolvedArgs[0]];
+                    }
+                } catch (error) {
+                    if (error instanceof TypeError) {
+                        type = "no_attributes";
+                    } else {
+                        // noinspection ExceptionCaughtLocallyJS
+                        throw error;
+                    }
+                }
+            } else if (call_type === "item") {
+                if (!Array.isArray(pointer)) {
+                    type = "not_an_array";
+                } else {
+                    const idx = resolvedArgs[0];
+
+                    if (idx > pointer.length - 1) {
+                        type = "out_of_bounds";
+                    } else {
+                        result = pointer[idx];
+                    }
+                }
             } else if (call_type === "prop_count") {
                 if (Array.isArray(pointer)) {
                     result = pointer.length;
@@ -412,6 +442,13 @@ class Handler {
     }
 
     /**
+     * Handles pointer being released
+     */
+    handleReleasePointer({ pointer_id }) {
+        this.executor.releasePointer(pointer_id);
+    }
+
+    /**
      * Handles a message from the Python side.
      *
      * @param {string} line A line of JSON
@@ -443,6 +480,8 @@ class Handler {
             this.handleImport(event.payload);
         } else if (event.type === "call") {
             this.handleCall(event.payload);
+        } else if (event.type === "release_pointer") {
+            this.handleReleasePointer(event.payload);
         } else {
             throw Error("Unknown event type");
         }

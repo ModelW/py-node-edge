@@ -12,7 +12,7 @@ revision its specifications should get more precise.
 -   [x] **Not too slow boot time** &mdash; Implementation of basic functionality
         showed that the boot time is quite high (0.5s) which is impractical for
         many applications. This needs to go down.
--   [ ] **Garbage collection** &mdash; When Python proxies get collected, the
+-   [x] **Garbage collection** &mdash; When Python proxies get collected, the
         corresponding resources on the JS side should be freed as well.
 
 ## 0.2

@@ -115,7 +115,9 @@ class CallType(Enum):
     """
 
     func = "func"
-    prop = "prop"
+    item = "item"
+    attr = "attr"
+    entry = "entry"
     prop_count = "prop_count"
     prop_set = "prop_set"
     prop_del = "prop_del"
@@ -161,6 +163,17 @@ class Finish:
 
 
 @dataclass
+class ReleasePointer:
+    """
+    Tells the JS side to delete references to this pointer, which will
+    eventually lead to the garbage collector being able to release the
+    associated memory.
+    """
+
+    id: int
+
+
+@dataclass
 class JavaScriptPointer:
     """
     A pointer to a JavaScript object
@@ -171,6 +184,15 @@ class JavaScriptPointer:
     array: bool
     repr: str
     engine: "NodeEngine"
+
+    # noinspection PyProtectedMember
+    def __del__(self):
+        """
+        On object deletion, notify the JS side so that it can also free its
+        memory.
+        """
+
+        self.engine._events.put(ReleasePointer(self.id))
 
     @property
     def proxy(self) -> Union["JavaScriptProxy", "JavaScriptArrayProxy"]:
@@ -221,10 +243,14 @@ class JavaScriptArrayProxy(MutableSequence[T]):
         )
 
     def __getitem__(self, index: int) -> T:
-        item = self.__dict__["__pointer__"].engine.call(self, [index], CallType.prop)
+        item = self.__dict__["__pointer__"].engine.call(self, [index], CallType.item)
 
-        if item.type != "success":
+        if item.type == "out_of_bounds":
             raise IndexError(f"Index {index} out of range")
+        elif item.type == "not_an_array":
+            raise TypeError("Not an array")
+        elif item.type != "success":
+            raise TypeError(f"Unexpected error")
 
         return item.result
 
@@ -264,10 +290,12 @@ class JavaScriptMappingProxy(MutableMapping[K, V]):
         self.__dict__["__pointer__"].engine.call(self, [key], CallType.prop_del)
 
     def __getitem__(self, key: K) -> V:
-        item = self.__dict__["__pointer__"].engine.call(self, [key], CallType.prop)
+        item = self.__dict__["__pointer__"].engine.call(self, [key], CallType.entry)
 
-        if item.type != "success":
-            raise KeyError(f"Key {key} not found")
+        if item.type == "no_such_entry":
+            raise KeyError(f"No such property {key}")
+        elif item.type != "success":
+            raise TypeError(f"Unexpected error")
 
         return item.result
 
@@ -291,28 +319,35 @@ class JavaScriptProxy:
     are proxied to the JS side, including calls to __call__.
     """
 
-    def __init__(self, pointer: JavaScriptPointer) -> None:
+    def __init__(
+        self, pointer: JavaScriptPointer, auto_bind: Optional[JavaScriptPointer] = None
+    ) -> None:
         self.__dict__["__pointer__"] = pointer
+        self.__dict__["__auto_bind__"] = auto_bind
 
     def __repr__(self):
         r = self.__dict__["__pointer__"].repr
         return f"<JavaScriptProxy {r}>"
 
     def __getattr__(self, item):
-        attr = self.__dict__["__pointer__"].engine.call(self, [item], CallType.prop)
+        attr = self.__dict__["__pointer__"].engine.call(self, [item], CallType.attr)
 
-        if attr.type != "success":
-            raise AttributeError(f"Attribute {item} not found")
+        if attr.type == "no_attributes":
+            raise TypeError("No attributes on this type")
+        elif attr.type == "no_such_property":
+            raise AttributeError(f"No such property {item}")
+        elif attr.type != "success":
+            raise TypeError(f"Unexpected error")
 
-        return attr.result
+        out = attr.result
+
+        if isinstance(out, JavaScriptProxy):
+            out.__dict__["__auto_bind__"] = self.__dict__["__pointer__"]
+
+        return out
 
     def __getitem__(self, item):
-        val = self.__dict__["__pointer__"].engine.call(self, [item], CallType.prop)
-
-        if val.type != "success":
-            raise KeyError(f"Key {item} not found")
-
-        return val.result
+        return JavaScriptMappingProxy(self.__dict__["__pointer__"]).__getitem__(item)
 
     def __setattr__(self, key, value):
         self.__dict__["__pointer__"].engine.call(self, [key, value], CallType.prop_set)
@@ -322,7 +357,13 @@ class JavaScriptProxy:
 
     def __call__(self, *args, **kwargs):
         return (
-            self.__dict__["__pointer__"].engine.call(self, args, CallType.func).result
+            self.__dict__["__pointer__"]
+            .engine.call(
+                self,
+                dict(args=args, auto_bind=self.__dict__["__auto_bind__"]),
+                CallType.func,
+            )
+            .result
         )
 
 
@@ -384,6 +425,8 @@ def _deep_point(obj):
         return dict(type="sequence", data=[_deep_point(i) for i in obj])
     elif isinstance(obj, Mapping):
         return dict(type="mapping", data={k: _deep_point(v) for k, v in obj.items()})
+    elif obj is None:
+        return dict(type="flat", data=None)
     else:
         raise NodeEdgeTypeError(f"Cannot serialize {type(obj)}")
 
@@ -510,7 +553,8 @@ class NodeEngine:
         if not (root / "index.js").exists():
             self._write_package_json(root)
             self._npm_install(root)
-            self._write_runtime(root)
+
+        self._write_runtime(root)
 
         return root
 
@@ -716,6 +760,8 @@ class NodeEngine:
                         pending_event.success = False
                         pending_event.error = payload["error"]
                         pending_event.event.set()
+                case ReleasePointer(id=pointer_id):
+                    self._release_pointer(pointer_id=pointer_id)
 
     def _run_listen_remote(self):
         """
@@ -861,6 +907,25 @@ class NodeEngine:
             self._listen_socket.close()
 
         self._events.put(Finish())
+
+    def _release_pointer(self, pointer_id: int):
+        """
+        Releases a pointer on the remote process.
+
+        Parameters
+        ----------
+        pointer_id
+            The ID of the pointer to release
+        """
+
+        self._send_message(
+            {
+                "type": "release_pointer",
+                "payload": {
+                    "pointer_id": pointer_id,
+                },
+            }
+        )
 
     def _final_value(self, msg):
         """
