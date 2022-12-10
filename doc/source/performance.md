@@ -7,22 +7,10 @@ at all.
 
 We'll review in this section all the different things that can go wrong.
 
-## Memory
-
-One important detail is that Node is sending "pointers" to Python so that
-[Proxies](proxies.md) can be created. Those pointers are never freed. So if you
-create a lot of them, you'll end up with a lot of memory usage.
-
-There is currently no solution to this except to shut down the Node Edge engine
-quickly after starting it and create a new one when you need it again.
-
 ## Startup time
 
-This might however be difficult to do, because when you start the engine you
-will implicitly run a `npm install` to get all the dependencies that you've
-asked for.
-
-And while it stays in cache, that takes a good 0.5s to run every time.
+A node process needs to be started every time you create a NodeEngine instance.
+This always takes a bit of time, count about 30ms.
 
 ## Proxies
 
@@ -37,6 +25,12 @@ doing:
 
 Then however `data` will be serialized as JSON so you no longer need to
 communicate with Node explore it further.
+
+```{note}
+When some proxy gets garbage-collected, it will send a message to Node to
+release the reference to the object. This is done to avoid memory leaks.
+But it will also occupy the communication channel and slow down operations.
+```
 
 ## Disk space
 
