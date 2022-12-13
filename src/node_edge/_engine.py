@@ -24,8 +24,7 @@ from typing import (
     Union,
 )
 
-from xdg import xdg_state_home
-
+from ._utils import xdg_state_home
 from .exceptions import *
 
 __all__ = [
@@ -446,12 +445,17 @@ class NodeEngine:
         debug: bool = False,
         env_dir_candidates: Optional[Sequence[str | Path]] = None,
     ):
+        default_paths = [Path(gettempdir())]
+
+        if Path.home():
+            default_paths.insert(0, xdg_state_home())
+
         self.package = package
         self.npm_bin = npm_bin
         self.node_bin = node_bin
         self.debug = debug
         self.env_dir_candidates = (
-            [xdg_state_home(), Path(gettempdir())]
+            default_paths
             if env_dir_candidates is None
             else [Path(i) for i in env_dir_candidates]
         )

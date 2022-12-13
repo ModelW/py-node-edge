@@ -14,7 +14,6 @@ keywords = ["node", "javascript", "binding"]
 
 [tool.poetry.dependencies]
 python = "^3.10"
-xdg = "^5.1.1"
 
 [tool.poetry.group.dev.dependencies]
 black = "^22.10.0"
