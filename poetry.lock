@@ -428,18 +428,10 @@ category = "dev"
 optional = false
 python-versions = "*"
 
-[[package]]
-name = "xdg"
-version = "5.1.1"
-description = "Variables defined by the XDG Base Directory Specification"
-category = "main"
-optional = false
-python-versions = ">=3.6,<4.0"
-
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.10"
-content-hash = "d262adc8af61db14da94e891c334bc290b684c5750d5086bd5fb46a4cdf7021e"
+content-hash = "339d5d033e7d56d91f3f13e9fda8e5f88d4943b2389230962c6f4f6aea9bb563"
 
 [metadata.files]
 appnope = [
@@ -652,8 +644,4 @@ traitlets = [
 wcwidth = [
     {file = "wcwidth-0.2.5-py2.py3-none-any.whl", hash = "sha256:beb4802a9cebb9144e99086eff703a642a13d6a0052920003a230f3294bbe784"},
     {file = "wcwidth-0.2.5.tar.gz", hash = "sha256:c4d647b99872929fdb7bdcaa4fbe7f01413ed3d98077df798530e5b04f116c83"},
-]
-xdg = [
-    {file = "xdg-5.1.1-py3-none-any.whl", hash = "sha256:865a7b56ed1d4cd2fce2ead1eddf97360843619757f473cd90b75f1817ca541d"},
-    {file = "xdg-5.1.1.tar.gz", hash = "sha256:aa619f26ccec6088b2a6018721d4ee86e602099b24644a90a8d3308a25acd06c"},
 ]

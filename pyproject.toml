@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "node-edge"
-version = "0.1.0b4"
+version = "0.1.0b5"
 description = "A tool to run Node code from Python"
 authors = ["Rémy Sanchez <remy.sanchez@hyperthese.net>"]
 license = "WTFPL"
@@ -14,7 +14,6 @@ keywords = ["node", "javascript", "binding"]
 
 [tool.poetry.dependencies]
 python = "^3.10"
-xdg = "^5.1.1"
 
 [tool.poetry.group.dev.dependencies]
 black = "^22.10.0"
