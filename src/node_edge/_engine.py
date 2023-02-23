@@ -872,10 +872,10 @@ class NodeEngine:
         root = self.create_env()
 
         self._listen_socket = socket.create_server(
-            address=("::1", 0),
-            family=socket.AF_INET6,
+            address=("127.0.0.1", 0),
+            family=socket.AF_INET,
         )
-        _, port, _, _ = self._listen_socket.getsockname()
+        _, port, *_ = self._listen_socket.getsockname()
 
         extra = {}
 

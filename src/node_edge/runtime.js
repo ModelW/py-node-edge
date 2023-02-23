@@ -521,7 +521,7 @@ function main() {
 
     client.setEncoding("utf-8");
     client.connect({
-        host: "::1",
+        host: "127.0.0.1",
         port: args.port,
     });
 
