@@ -1,6 +1,7 @@
 """Core engine running Node code from Python over a local socket."""
 
 import json
+import os
 import socket
 from collections.abc import Iterator, Mapping, MutableMapping, MutableSequence, Sequence
 from dataclasses import dataclass
@@ -15,7 +16,7 @@ from tempfile import gettempdir
 from threading import Event, Thread
 from typing import Any, TextIO, TypeVar
 
-from ._binaries import default_node_bin, default_npm_bin
+from ._binaries import default_node_bin, default_npm_command
 from ._utils import xdg_state_home
 from .exceptions import (
     JavaScriptError,
@@ -474,7 +475,10 @@ class NodeEngine:
             default_paths.insert(0, xdg_state_home())
 
         self.package = package
-        self.npm_bin = npm_bin if npm_bin is not None else default_npm_bin()
+        self.npm_command: list[str] = (
+            [npm_bin] if npm_bin is not None else default_npm_command()
+        )
+        self.npm_bin = self.npm_command[0]
         self.node_bin = node_bin if node_bin is not None else default_node_bin()
         self.debug = debug
         self.env_dir_candidates = (
@@ -491,6 +495,7 @@ class NodeEngine:
         self._remote_thread: Thread | None = None
         self._events_thread: Thread | None = None
         self._pending: dict[str, Eval | Await | Import | Call] = {}
+        self._dead = False
 
     @property
     def package_signature(self) -> str:
@@ -647,11 +652,12 @@ class NodeEngine:
         """
 
         p = Popen(
-            args=[self.npm_bin, "install"],
+            args=[*self.npm_command, "install"],
             stdin=DEVNULL,
             stdout=DEVNULL,
             stderr=PIPE,
             cwd=root,
+            env=self._subprocess_env(),
         )
 
         if p.wait():
@@ -662,6 +668,21 @@ class NodeEngine:
 
             msg = f"Could not create env: {err}"
             raise NodeEdgeException(msg)
+
+    def _fail_pending(self) -> None:
+        """
+        Fails all pending requests. Called when the connection to the Node
+        process is lost, so that threads blocked waiting for a reply receive
+        an error instead of waiting forever.
+        """
+
+        self._dead = True
+
+        while self._pending:
+            _, pending_event = self._pending.popitem()
+            pending_event.success = False
+            pending_event.error = {"message": "Node process died"}
+            pending_event.event.set()
 
     def _resolve_pending(self, event_id: str, payload: Mapping, success: bool) -> None:
         """
@@ -779,7 +800,9 @@ class NodeEngine:
         self._events_thread.start()
 
         try:
-            while True:
+            eof = False
+
+            while not eof:
                 sel.select(1)
 
                 try:
@@ -797,6 +820,11 @@ class NodeEngine:
 
                             buf.clear()
                             buf.append(bits[-1])
+                    else:
+                        # recv() returned b"": the remote process closed the
+                        # connection (it probably died). Stop listening,
+                        # otherwise this loop spins forever on a dead socket.
+                        eof = True
                 except BlockingIOError:
                     pass
         except Exception as e:
@@ -805,6 +833,11 @@ class NodeEngine:
                     pass
                 case _:
                     raise
+        finally:
+            # Wake up anything still blocked on a pending request so that
+            # the caller gets an error instead of waiting forever.
+            self._events.put(Finish())
+            self._fail_pending()
 
     def send_message(self, data):
         """
@@ -840,6 +873,23 @@ class NodeEngine:
             # themselves). Nothing useful can be done about it.
             pass
 
+    def _subprocess_env(self) -> dict[str, str]:
+        """
+        Environment for the node/npm subprocesses. The directory of the node
+        binary is prepended to the PATH: npm is a script whose shebang
+        expects `node` to be findable, which isn't a given when using the
+        binaries bundled by nodejs-wheel (or any custom node_bin outside of
+        the PATH).
+        """
+
+        env = dict(os.environ)
+        node_dir = str(Path(self.node_bin).absolute().parent)
+
+        if Path(self.node_bin).is_absolute() or "/" in self.node_bin:
+            env["PATH"] = node_dir + os.pathsep + env.get("PATH", "")
+
+        return env
+
     def start(self):
         """
         Starts the engine. This will start the remote process, and the events
@@ -867,11 +917,15 @@ class NodeEngine:
         self._remote_proc = Popen(
             args=[self.node_bin, "./index.js", f"{port}"],
             cwd=root,
+            env=self._subprocess_env(),
             **extra,
         )
 
-        self._remote_thread = Thread(target=self._run_listen_remote)
-        self._events_thread = Thread(target=self._run_events)
+        # Daemon threads: if the user forgets to stop() the engine (or an
+        # exception bypasses it), the interpreter must still be able to exit
+        # instead of hanging forever, e.g. in CI.
+        self._remote_thread = Thread(target=self._run_listen_remote, daemon=True)
+        self._events_thread = Thread(target=self._run_events, daemon=True)
 
         self._remote_thread.start()
 
@@ -942,6 +996,10 @@ class NodeEngine:
             The JS code to evaluate
         """
 
+        if self._dead:
+            msg_err = "Node process died"
+            raise NodeEdgeException(msg_err)
+
         req = Eval(code, Event())
         self._events.put(req)
         req.event.wait()
@@ -991,6 +1049,10 @@ class NodeEngine:
         if not pointer.awaitable:
             msg = "Cannot await a non-awaitable pointer"
             raise NodeEdgeValueError(msg)
+
+        if self._dead:
+            msg_err = "Node process died"
+            raise NodeEdgeException(msg_err)
 
         req = Await(pointer.id, Event())
         self._events.put(req)
@@ -1055,6 +1117,10 @@ class NodeEngine:
         etc.
         """
 
+        if self._dead:
+            msg_err = "Node process died"
+            raise NodeEdgeException(msg_err)
+
         req = Import(module, name, Event())
         self._events.put(req)
         req.event.wait()
@@ -1102,6 +1168,10 @@ class NodeEngine:
         pointer = _get_pointer(pointer)
 
         clean_args: list[Any] = _deep_point(args)
+        if self._dead:
+            msg_err = "Node process died"
+            raise NodeEdgeException(msg_err)
+
         req = Call(pointer.id, clean_args, call_type, Event())
         self._events.put(req)
         req.event.wait()

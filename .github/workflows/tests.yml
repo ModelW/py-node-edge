@@ -7,10 +7,10 @@ jobs:
         runs-on: ubuntu-latest
 
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v7
 
             - name: Setup uv
-              uses: astral-sh/setup-uv@v5
+              uses: astral-sh/setup-uv@v10
 
             - name: Ruff check
               run: |
@@ -28,15 +28,15 @@ jobs:
                 node-version: ["20", "22", "24"]
 
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v7
 
             - name: Setup Node ${{ matrix.node-version }}
-              uses: actions/setup-node@v4
+              uses: actions/setup-node@v7
               with:
                   node-version: ${{ matrix.node-version }}
 
             - name: Setup uv
-              uses: astral-sh/setup-uv@v5
+              uses: astral-sh/setup-uv@v10
               with:
                   python-version: ${{ matrix.python-version }}
 
@@ -47,10 +47,10 @@ jobs:
         runs-on: ubuntu-latest
 
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v7
 
             - name: Setup uv
-              uses: astral-sh/setup-uv@v5
+              uses: astral-sh/setup-uv@v10
 
             - name: Run tests with nodejs-wheel and no system Node
               run: |

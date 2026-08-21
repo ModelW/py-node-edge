@@ -1,6 +1,6 @@
 from importlib.metadata import version
 
-from ._binaries import default_node_bin, default_npm_bin
+from ._binaries import default_node_bin, default_npm_bin, default_npm_command
 from ._engine import (
     JavaScriptArrayProxy,
     JavaScriptMappingProxy,
@@ -34,4 +34,5 @@ __all__ = [
     "as_mapping",
     "default_node_bin",
     "default_npm_bin",
+    "default_npm_command",
 ]

@@ -10,26 +10,24 @@ no Node installation at all.
 import os
 from pathlib import Path
 
-__all__ = ["default_node_bin", "default_npm_bin"]
+__all__ = ["default_node_bin", "default_npm_bin", "default_npm_command"]
 
 
-def _nodejs_wheel_bin_dir() -> Path | None:
-    """Locate the binary directory of nodejs-wheel, if installed.
+def _nodejs_wheel_root() -> Path | None:
+    """Locate the root directory of nodejs-wheel, if installed.
 
     Returns
     -------
     Path or None
-        The directory containing the bundled ``node``/``npm`` binaries, or
-        None if ``nodejs-wheel-binaries`` is not installed.
+        The package directory of ``nodejs-wheel-binaries``, or None if it is
+        not installed.
     """
     try:
         from nodejs_wheel.executable import ROOT_DIR
     except ImportError:
         return None
 
-    root = Path(ROOT_DIR)
-
-    return root if os.name == "nt" else root / "bin"
+    return Path(ROOT_DIR)
 
 
 def default_node_bin() -> str:
@@ -38,8 +36,11 @@ def default_node_bin() -> str:
     Prefers the binary bundled by ``nodejs-wheel-binaries`` when available,
     and falls back to whatever ``node`` resolves to in the ``PATH``.
     """
-    if bin_dir := _nodejs_wheel_bin_dir():
-        return str(bin_dir / ("node.exe" if os.name == "nt" else "node"))
+    if root := _nodejs_wheel_root():
+        if os.name == "nt":
+            return str(root / "node.exe")
+
+        return str(root / "bin" / "node")
 
     return "node"
 
@@ -47,10 +48,25 @@ def default_node_bin() -> str:
 def default_npm_bin() -> str:
     """Return the default ``npm`` binary to use.
 
-    Prefers the binary bundled by ``nodejs-wheel-binaries`` when available,
-    and falls back to whatever ``npm`` resolves to in the ``PATH``.
+    .. deprecated::
+        Use :func:`default_npm_command` instead, which correctly invokes the
+        npm bundled by nodejs-wheel. This is kept for backwards compat and
+        only ever returns the PATH-based fallback.
     """
-    if bin_dir := _nodejs_wheel_bin_dir():
-        return str(bin_dir / ("npm.cmd" if os.name == "nt" else "npm"))
-
     return "npm"
+
+
+def default_npm_command() -> list[str]:
+    """Return the default command (argv prefix) that runs npm.
+
+    When ``nodejs-wheel-binaries`` is installed, its ``bin/npm`` shim is a
+    broken copy of what should be a symlink, so — like nodejs-wheel's own
+    Python API does — npm is invoked as ``node .../npm/bin/npm-cli.js``.
+    Otherwise this is just ``["npm"]`` from the ``PATH``.
+    """
+    if root := _nodejs_wheel_root():
+        npm_cli = root / "lib" / "node_modules" / "npm" / "bin" / "npm-cli.js"
+
+        return [default_node_bin(), str(npm_cli)]
+
+    return ["npm"]
