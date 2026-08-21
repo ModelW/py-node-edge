@@ -1,4 +1,15 @@
-PYTHON_BIN ?= poetry run python
+.PHONY: format lint typecheck test
 
 format:
-	$(PYTHON_BIN) -m monoformat .
+	uv run ruff check --fix --select I .
+	uv run ruff format .
+
+lint: typecheck
+	uv run ruff check .
+	uv run ruff format --check .
+
+typecheck:
+	uv run mypy
+
+test:
+	uv run pytest tests

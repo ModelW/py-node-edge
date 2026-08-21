@@ -3,10 +3,10 @@ import sys
 from time import sleep
 from weakref import ref
 
-from pytest import raises
+import pytest
 
-from node_edge import *
-from node_edge.exceptions import *
+from node_edge import JavaScriptPointer, JavaScriptProxy, NodeEngine
+from node_edge.exceptions import JavaScriptError
 
 
 def test_gc():
@@ -51,5 +51,5 @@ def test_gc():
             JavaScriptPointer(pointer_id, False, False, "fake", ne)
         )
 
-        with raises(JavaScriptError):
+        with pytest.raises(JavaScriptError):
             new_foo.getVal()()

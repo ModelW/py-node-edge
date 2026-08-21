@@ -1,4 +1,4 @@
-from pytest import raises
+import pytest
 
 from node_edge import (
     JavaScriptArrayProxy,
@@ -7,7 +7,9 @@ from node_edge import (
     NodeEngine,
     as_mapping,
 )
-from node_edge.exceptions import *
+from node_edge.exceptions import (
+    NodeEdgeTypeError,
+)
 
 
 def test_array_proxy():
@@ -29,7 +31,7 @@ def test_array_proxy():
         del arr[2]
         assert len(arr) == 2
 
-        with raises(IndexError):
+        with pytest.raises(IndexError):
             # noinspection PyStatementEffect
             arr[2]
 
@@ -55,7 +57,7 @@ def test_mapping_proxy():
         del mapping["foo"]
         assert len(mapping) == 2
 
-        with raises(KeyError):
+        with pytest.raises(KeyError):
             # noinspection PyStatementEffect
             mapping["foo"]
 
@@ -79,11 +81,10 @@ def test_object_proxy():
 
         del obj.foo
 
-        with raises(AttributeError):
-            # noinspection PyStatementEffect
-            obj.foo
+        with pytest.raises(AttributeError):
+            _ = obj.foo
 
-        with raises(KeyError):
+        with pytest.raises(KeyError):
             # noinspection PyStatementEffect
             obj["foo"]
 
@@ -98,8 +99,8 @@ def test_as_mapping():
             as_mapping(obj.__dict__["__pointer__"]), JavaScriptMappingProxy
         )
 
-        with raises(NodeEdgeTypeError):
-            as_mapping("foo")  # noqa
+        with pytest.raises(NodeEdgeTypeError):
+            as_mapping("foo")
 
 
 def test_get_pointer():
@@ -107,5 +108,5 @@ def test_get_pointer():
         promise = ne.eval("new Promise((resolve) => resolve(42))")
         assert ne.await_(promise.__dict__["__pointer__"]) == 42
 
-        with raises(NodeEdgeTypeError):
-            ne.await_("foo")  # noqa
+        with pytest.raises(NodeEdgeTypeError):
+            ne.await_("foo")

@@ -2,23 +2,23 @@
 
 When you're making a call to Node Edge, one of two things can happen:
 
--   Either the return value can be serialized into JSON, in which case you get a
-    copy of the Node value that has been serialized through JSON (this it's not
-    "connected" to Node anymore)
--   Or the return value cannot be serialized into JSON, in which case you get a
-    proxy object that will let you call Node functions from Python.
+- Either the return value can be serialized into JSON, in which case you get a
+  copy of the Node value that has been serialized through JSON (this it's not
+  "connected" to Node anymore)
+- Or the return value cannot be serialized into JSON, in which case you get a
+  proxy object that will let you call Node functions from Python.
 
 As you might know, the typing of objects in JS is a bit ambiguous and does not
 always map super well to Pythonic concepts. That's why we've got three different
 proxies:
 
--   `JavaScriptProxy` &mdash; Is a proxy for a "class instance" or a "module" or
-    anything that will generally have methods you can call and stuff like this.
--   `JavaScriptArrayProxy` &mdash; Arrays are a special type of objects in JS
-    and they _can_ be detected so if we encounter one that's the proxy you'll be
-    getting
--   `JavaScriptMappingProxy` &mdash; This one will treat the object as a mapping
-    (dict-like) and will let you access items on it.
+- `JavaScriptProxy` &mdash; Is a proxy for a "class instance" or a "module" or
+  anything that will generally have methods you can call and stuff like this.
+- `JavaScriptArrayProxy` &mdash; Arrays are a special type of objects in JS and
+  they _can_ be detected so if we encounter one that's the proxy you'll be
+  getting
+- `JavaScriptMappingProxy` &mdash; This one will treat the object as a mapping
+  (dict-like) and will let you access items on it.
 
 ## JavaScriptProxy
 
@@ -105,8 +105,8 @@ side, wait for the promise to resolve if required and then return the result.
 
 The arguments you pass can either be:
 
--   Something that can be serialized into JSON
--   Any of the proxies
+- Something that can be serialized into JSON
+- Any of the proxies
 
 The proxy can be nested deep inside the JSON structure, it will be detected and
 converted back into its JS counterpart once in Node.

@@ -19,9 +19,9 @@ list the keys of a mapping, etc) will result in a round trip to Node. So if you
 do something like `axios.get("https://httpbin.org/get").data` you'll end up
 doing:
 
--   A trip to get `get`
--   A trip to call `get`
--   A trip to get `data`
+- A trip to get `get`
+- A trip to call `get`
+- A trip to get `data`
 
 Then however `data` will be serialized as JSON so you no longer need to
 communicate with Node explore it further.

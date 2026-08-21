@@ -5,10 +5,10 @@ Yay you want to contribute! Here are a few rules.
 This repository follows the [WITH Madrid](https://code.with-madrid.com/) code
 guidelines. Specifically, this means that:
 
--   Git is managed using git-flow
--   You can format the code in any way you want as long as it matches the output
-    of `black` and `isort`
--   Everything needs to be documented
+- Git is managed using git-flow
+- You can format the code in any way you want as long as it matches the output
+  of `black` and `isort`
+- Everything needs to be documented
 
 Let's go about those things.
 

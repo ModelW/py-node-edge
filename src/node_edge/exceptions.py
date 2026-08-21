@@ -1,8 +1,10 @@
+"""Exceptions raised by node-edge."""
+
 __all__ = [
-    "NodeEdgeException",
-    "NodeEdgeValueError",
-    "NodeEdgeTypeError",
     "JavaScriptError",
+    "NodeEdgeException",
+    "NodeEdgeTypeError",
+    "NodeEdgeValueError",
 ]
 
 
@@ -13,11 +15,11 @@ class NodeEdgeException(Exception):
 
 
 class NodeEdgeValueError(NodeEdgeException, ValueError):
-    pass
+    """A ValueError flavor of NodeEdgeException."""
 
 
 class NodeEdgeTypeError(NodeEdgeException, TypeError):
-    pass
+    """A TypeError flavor of NodeEdgeException."""
 
 
 class JavaScriptError(NodeEdgeException):

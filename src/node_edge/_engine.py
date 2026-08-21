@@ -1,5 +1,8 @@
+"""Core engine running Node code from Python over a local socket."""
+
 import json
 import socket
+from collections.abc import Iterator, Mapping, MutableMapping, MutableSequence, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from hashlib import sha256
@@ -10,32 +13,25 @@ from selectors import EVENT_READ, DefaultSelector
 from subprocess import DEVNULL, PIPE, Popen
 from tempfile import gettempdir
 from threading import Event, Thread
-from typing import (
-    Any,
-    Iterator,
-    List,
-    Mapping,
-    MutableMapping,
-    MutableSequence,
-    Optional,
-    Sequence,
-    TextIO,
-    TypeVar,
-    Union,
+from typing import Any, TextIO, TypeVar
+
+from ._binaries import default_node_bin, default_npm_bin
+from ._utils import xdg_state_home
+from .exceptions import (
+    JavaScriptError,
+    NodeEdgeException,
+    NodeEdgeTypeError,
+    NodeEdgeValueError,
 )
 
-from ._utils import xdg_state_home
-from .exceptions import *
-
 __all__ = [
-    "NodeEngine",
-    "JavaScriptPointer",
-    "as_mapping",
-    "JavaScriptPointer",
-    "JavaScriptProxy",
     "JavaScriptArrayProxy",
     "JavaScriptMappingProxy",
+    "JavaScriptPointer",
+    "JavaScriptProxy",
+    "NodeEngine",
     "PointerIsh",
+    "as_mapping",
 ]
 
 
@@ -74,9 +70,9 @@ class Eval:
 
     code: str
     event: Event
-    success: Optional[bool] = None
-    result: Optional[Any] = None
-    error: Optional[Mapping] = None
+    success: bool | None = None
+    result: Any | None = None
+    error: Mapping | None = None
 
 
 @dataclass
@@ -87,9 +83,9 @@ class Await:
 
     pointer_id: int
     event: Event
-    success: Optional[bool] = None
-    result: Optional[Any] = None
-    error: Optional[Mapping] = None
+    success: bool | None = None
+    result: Any | None = None
+    error: Mapping | None = None
 
 
 @dataclass
@@ -101,9 +97,9 @@ class Import:
     module: str
     name: str
     event: Event
-    success: Optional[bool] = None
-    result: Optional[Any] = None
-    error: Optional[Mapping] = None
+    success: bool | None = None
+    result: Any | None = None
+    error: Mapping | None = None
 
 
 class CallType(Enum):
@@ -131,13 +127,13 @@ class Call:
     """
 
     pointer_id: int
-    args: List[Any]
+    args: list[Any]
     type: CallType
     event: Event
-    success: Optional[bool] = None
-    result: Optional[Any] = None
-    result_type: Optional[str] = None
-    error: Optional[Mapping] = None
+    success: bool | None = None
+    result: Any | None = None
+    result_type: str | None = None
+    error: Mapping | None = None
 
 
 @dataclass
@@ -194,7 +190,7 @@ class JavaScriptPointer:
         self.engine._events.put(ReleasePointer(self.id))
 
     @property
-    def proxy(self) -> Union["JavaScriptProxy", "JavaScriptArrayProxy"]:
+    def proxy(self) -> "JavaScriptProxy | JavaScriptArrayProxy":
         """
         JS is mixing up arrays, mappings and objects. Well Python isn't so we
         kind of need to deal with that.
@@ -241,24 +237,27 @@ class JavaScriptArrayProxy(MutableSequence[T]):
             self, [index, value], CallType.item_insert
         )
 
-    def __getitem__(self, index: int) -> T:
+    def __getitem__(self, index: int) -> T:  # type: ignore[override]
         item = self.__dict__["__pointer__"].engine.call(self, [index], CallType.item)
 
         if item.type == "out_of_bounds":
-            raise IndexError(f"Index {index} out of range")
+            msg = f"Index {index} out of range"
+            raise IndexError(msg)
         elif item.type == "not_an_array":
-            raise TypeError("Not an array")
+            msg = "Not an array"
+            raise TypeError(msg)
         elif item.type != "success":
-            raise TypeError(f"Unexpected error")
+            msg = "Unexpected error"
+            raise TypeError(msg)
 
         return item.result
 
-    def __setitem__(self, index: int, value: T) -> None:
+    def __setitem__(self, index: int, value: T) -> None:  # type: ignore[override]
         self.__dict__["__pointer__"].engine.call(
             self, [index, value], CallType.prop_set
         )
 
-    def __delitem__(self, index: int) -> None:
+    def __delitem__(self, index: int) -> None:  # type: ignore[override]
         self.__dict__["__pointer__"].engine.call(self, [index], CallType.prop_del)
 
     def __len__(self) -> int:
@@ -292,9 +291,11 @@ class JavaScriptMappingProxy(MutableMapping[K, V]):
         item = self.__dict__["__pointer__"].engine.call(self, [key], CallType.entry)
 
         if item.type == "no_such_entry":
-            raise KeyError(f"No such property {key}")
+            msg = f"No such property {key}"
+            raise KeyError(msg)
         elif item.type != "success":
-            raise TypeError(f"Unexpected error")
+            msg = "Unexpected error"
+            raise TypeError(msg)
 
         return item.result
 
@@ -306,9 +307,11 @@ class JavaScriptMappingProxy(MutableMapping[K, V]):
         )
 
     def __iter__(self) -> Iterator[K]:
-        yield from self.__dict__["__pointer__"].engine.call(
-            self, [], CallType.prop_list
-        ).result
+        yield from (
+            self.__dict__["__pointer__"]
+            .engine.call(self, [], CallType.prop_list)
+            .result
+        )
 
 
 class JavaScriptProxy:
@@ -319,7 +322,7 @@ class JavaScriptProxy:
     """
 
     def __init__(
-        self, pointer: JavaScriptPointer, auto_bind: Optional[JavaScriptPointer] = None
+        self, pointer: JavaScriptPointer, auto_bind: JavaScriptPointer | None = None
     ) -> None:
         self.__dict__["__pointer__"] = pointer
         self.__dict__["__auto_bind__"] = auto_bind
@@ -332,11 +335,14 @@ class JavaScriptProxy:
         attr = self.__dict__["__pointer__"].engine.call(self, [item], CallType.attr)
 
         if attr.type == "no_attributes":
-            raise TypeError("No attributes on this type")
+            msg = "No attributes on this type"
+            raise TypeError(msg)
         elif attr.type == "no_such_property":
-            raise AttributeError(f"No such property {item}")
+            msg = f"No such property {item}"
+            raise AttributeError(msg)
         elif attr.type != "success":
-            raise TypeError(f"Unexpected error")
+            msg = "Unexpected error"
+            raise TypeError(msg)
 
         out = attr.result
 
@@ -366,9 +372,7 @@ class JavaScriptProxy:
         )
 
 
-def as_mapping(
-    obj: Union[JavaScriptPointer, JavaScriptProxy]
-) -> JavaScriptMappingProxy:
+def as_mapping(obj: Any) -> "JavaScriptMappingProxy":
     """
     Converts the pointer (or another proxy) into a mapping proxy, in case you
     want a full dictionary interface in your JS object.
@@ -379,18 +383,16 @@ def as_mapping(
     elif isinstance(obj, JavaScriptProxy):
         return JavaScriptMappingProxy(obj.__dict__["__pointer__"])
     else:
-        raise NodeEdgeTypeError("Object must be a JavaScriptPointer or JavaScriptProxy")
+        msg = "Object must be a JavaScriptPointer or JavaScriptProxy"
+        raise NodeEdgeTypeError(msg)
 
 
-PointerIsh = Union[
-    JavaScriptPointer,
-    JavaScriptProxy,
-    JavaScriptArrayProxy,
-    JavaScriptMappingProxy,
-]
+PointerIsh = (
+    JavaScriptPointer | JavaScriptProxy | JavaScriptArrayProxy | JavaScriptMappingProxy
+)
 
 
-def _get_pointer(pointer: PointerIsh) -> JavaScriptPointer:
+def _get_pointer(pointer: Any) -> JavaScriptPointer:
     """
     Get the pointer from a proxy
     """
@@ -402,9 +404,8 @@ def _get_pointer(pointer: PointerIsh) -> JavaScriptPointer:
     ):
         return pointer.__dict__["__pointer__"]
     else:
-        raise NodeEdgeTypeError(
-            "pointer must be a JavaScriptPointer or JavaScriptProxy"
-        )
+        msg = "pointer must be a JavaScriptPointer or JavaScriptProxy"
+        raise NodeEdgeTypeError(msg)
 
 
 def _deep_point(obj):
@@ -427,7 +428,8 @@ def _deep_point(obj):
     elif obj is None:
         return dict(type="flat", data=None)
     else:
-        raise NodeEdgeTypeError(f"Cannot serialize {type(obj)}")
+        msg = f"Cannot serialize {type(obj)}"
+        raise NodeEdgeTypeError(msg)
 
 
 class NodeEngine:
@@ -440,34 +442,55 @@ class NodeEngine:
     def __init__(
         self,
         package: Mapping,
-        npm_bin: str = "npm",
-        node_bin: str = "node",
+        npm_bin: str | None = None,
+        node_bin: str | None = None,
         debug: bool = False,
-        env_dir_candidates: Optional[Sequence[str | Path]] = None,
+        env_dir_candidates: Sequence[str | Path] | None = None,
     ):
+        """Configure the engine (without starting it).
+
+        Parameters
+        ----------
+        package
+            A package.json-like mapping describing the Node environment,
+            most notably its ``dependencies``.
+        npm_bin
+            Path to the ``npm`` binary. Defaults to the one bundled by
+            ``nodejs-wheel-binaries`` if installed, otherwise ``npm`` from
+            the PATH.
+        node_bin
+            Path to the ``node`` binary, same default logic as ``npm_bin``.
+        debug
+            If True, the Node process inherits stdio so its output becomes
+            visible.
+        env_dir_candidates
+            Directories in which the Node environment may be created. The
+            first one that works is used. Defaults to the XDG state home
+            then the system temp directory.
+        """
         default_paths = [Path(gettempdir())]
 
         if Path.home():
             default_paths.insert(0, xdg_state_home())
 
         self.package = package
-        self.npm_bin = npm_bin
-        self.node_bin = node_bin
+        self.npm_bin = npm_bin if npm_bin is not None else default_npm_bin()
+        self.node_bin = node_bin if node_bin is not None else default_node_bin()
         self.debug = debug
         self.env_dir_candidates = (
             default_paths
             if env_dir_candidates is None
             else [Path(i) for i in env_dir_candidates]
         )
-        self._env_dir = None
-        self._listen_socket: Optional[socket.socket] = None
-        self._remote_conn: Optional[socket.socket] = None
-        self._remote_read: Optional[TextIO] = None
-        self._remote_proc: Optional[Popen] = None
-        self._events = Queue(1000)
-        self._remote_thread: Optional[Thread] = None
-        self._events_thread: Optional[Thread] = None
-        self._pending = {}
+        self._env_dir: Path | None = None
+        self._listen_socket: socket.socket | None = None
+        self._remote_conn: socket.socket | None = None
+        self._remote_read: TextIO | None = None
+        self._remote_proc: Popen | None = None
+        self._events: Queue[Any] = Queue(1000)
+        self._remote_thread: Thread | None = None
+        self._events_thread: Thread | None = None
+        self._pending: dict[str, Eval | Await | Import | Call] = {}
 
     @property
     def package_signature(self) -> str:
@@ -528,7 +551,8 @@ class NodeEngine:
             if self._try_env_candidate(full_path):
                 return full_path
 
-        raise NodeEdgeException("Could not find/create env dir")
+        msg = "Could not find/create env dir"
+        raise NodeEdgeException(msg)
 
     def ensure_env_dir(self, force: bool = False) -> Path:
         """
@@ -588,7 +612,7 @@ class NodeEngine:
             },
         }
 
-        with open(root / "package.json", "w") as f:
+        with (root / "package.json").open("w") as f:
             json.dump(package, f, indent=4)
 
     def _write_runtime(self, root: Path):
@@ -603,9 +627,10 @@ class NodeEngine:
             The environment directory
         """
 
-        with open(root / "index.js", "w", encoding="utf-8") as o, open(
-            Path(__file__).parent / "runtime.js", "r", encoding="utf-8"
-        ) as i:
+        with (
+            (root / "index.js").open("w", encoding="utf-8") as o,
+            (Path(__file__).parent / "runtime.js").open(encoding="utf-8") as i,
+        ):
             while buf := i.read(1024**2):
                 o.write(buf)
 
@@ -631,11 +656,43 @@ class NodeEngine:
 
         if p.wait():
             try:
-                err = p.stderr.read().decode()[-1000:]
+                err = p.stderr.read().decode()[-1000:] if p.stderr else "unknown error"
             except UnicodeDecodeError:
                 err = "unknown error"
 
-            raise NodeEdgeException(f"Could not create env: {err}")
+            msg = f"Could not create env: {err}"
+            raise NodeEdgeException(msg)
+
+    def _resolve_pending(self, event_id: str, payload: Mapping, success: bool) -> None:
+        """
+        Resolves a pending request with the response received from the JS
+        side, and wakes up the thread that is blocked waiting for it.
+
+        Parameters
+        ----------
+        event_id
+            Correlation ID of the request
+        payload
+            Payload of the response message
+        success
+            Whether the JS side reported a success or an error
+        """
+
+        if event_id not in self._pending:
+            return
+
+        pending_event = self._pending.pop(event_id)
+        pending_event.success = success
+
+        if success:
+            pending_event.result = payload["result"]
+
+            if isinstance(pending_event, Call):
+                pending_event.result_type = payload["type"]
+        else:
+            pending_event.error = payload["error"]
+
+        pending_event.event.set()
 
     def _run_events(self):
         """
@@ -653,84 +710,12 @@ class NodeEngine:
                 case Eval(code=code):
                     self._pending[str(id(evt))] = evt
                     self._eval(event_id=id(evt), code=code)
-                case RemoteMessage(
-                    content={
-                        "type": "eval_result",
-                        "payload": payload,
-                        "event_id": event_id,
-                    }
-                ):
-                    if event_id in self._pending:
-                        pending_event = self._pending.pop(event_id)
-                        pending_event.success = True
-                        pending_event.result = payload["result"]
-                        pending_event.event.set()
-                case RemoteMessage(
-                    content={
-                        "type": "eval_error",
-                        "payload": payload,
-                        "event_id": event_id,
-                    }
-                ):
-                    if event_id in self._pending:
-                        pending_event = self._pending.pop(event_id)
-                        pending_event.success = False
-                        pending_event.error = payload["error"]
-                        pending_event.event.set()
                 case Await(pointer_id=pointer_id):
                     self._pending[str(id(evt))] = evt
                     self._await(event_id=id(evt), pointer_id=pointer_id)
-                case RemoteMessage(
-                    content={
-                        "type": "await_result",
-                        "payload": payload,
-                        "event_id": event_id,
-                    }
-                ):
-                    if event_id in self._pending:
-                        pending_event = self._pending.pop(event_id)
-                        pending_event.success = True
-                        pending_event.result = payload["result"]
-                        pending_event.event.set()
-                case RemoteMessage(
-                    content={
-                        "type": "await_error",
-                        "payload": payload,
-                        "event_id": event_id,
-                    }
-                ):
-                    if event_id in self._pending:
-                        pending_event = self._pending.pop(event_id)
-                        pending_event.success = False
-                        pending_event.error = payload["error"]
-                        pending_event.event.set()
                 case Import(module=module, name=name):
                     self._pending[str(id(evt))] = evt
                     self._import(event_id=id(evt), module=module, name=name)
-                case RemoteMessage(
-                    content={
-                        "type": "import_result",
-                        "payload": payload,
-                        "event_id": event_id,
-                    }
-                ):
-                    if event_id in self._pending:
-                        pending_event = self._pending.pop(event_id)
-                        pending_event.success = True
-                        pending_event.result = payload["result"]
-                        pending_event.event.set()
-                case RemoteMessage(
-                    content={
-                        "type": "import_error",
-                        "payload": payload,
-                        "event_id": event_id,
-                    }
-                ):
-                    if event_id in self._pending:
-                        pending_event = self._pending.pop(event_id)
-                        pending_event.success = False
-                        pending_event.error = payload["error"]
-                        pending_event.event.set()
                 case Call(pointer_id=pointer_id, args=args, type=type_):
                     self._pending[str(id(evt))] = evt
                     self._call(
@@ -739,33 +724,20 @@ class NodeEngine:
                         call_type=type_,
                         event_id=id(evt),
                     )
-                case RemoteMessage(
-                    content={
-                        "type": "call_result",
-                        "payload": payload,
-                        "event_id": event_id,
-                    }
-                ):
-                    if event_id in self._pending:
-                        pending_event = self._pending.pop(event_id)
-                        pending_event.success = True
-                        pending_event.result = payload["result"]
-                        pending_event.result_type = payload["type"]
-                        pending_event.event.set()
-                case RemoteMessage(
-                    content={
-                        "type": "call_error",
-                        "payload": payload,
-                        "event_id": event_id,
-                    }
-                ):
-                    if event_id in self._pending:
-                        pending_event = self._pending.pop(event_id)
-                        pending_event.success = False
-                        pending_event.error = payload["error"]
-                        pending_event.event.set()
                 case ReleasePointer(id=pointer_id):
                     self._release_pointer(pointer_id=pointer_id)
+                case RemoteMessage(
+                    content={
+                        "type": str() as msg_type,
+                        "payload": payload,
+                        "event_id": event_id,
+                    }
+                ) if msg_type.endswith(("_result", "_error")):
+                    self._resolve_pending(
+                        event_id=event_id,
+                        payload=payload,
+                        success=msg_type.endswith("_result"),
+                    )
 
     def _run_listen_remote(self):
         """
@@ -828,7 +800,7 @@ class NodeEngine:
                 except BlockingIOError:
                     pass
         except Exception as e:
-            match (e):
+            match e:
                 case OSError(errno=9):
                     pass
                 case _:
@@ -858,9 +830,15 @@ class NodeEngine:
             The data to send
         """
 
-        self._remote_conn.send(
-            json.dumps(data, ensure_ascii=True).encode("ascii") + b"\n"
-        )
+        try:
+            self._remote_conn.send(
+                json.dumps(data, ensure_ascii=True).encode("ascii") + b"\n"
+            )
+        except OSError:
+            # The connection is gone (typically, the engine is stopping and
+            # garbage-collected pointers are still trying to release
+            # themselves). Nothing useful can be done about it.
+            pass
 
     def start(self):
         """
@@ -964,14 +942,14 @@ class NodeEngine:
             The JS code to evaluate
         """
 
-        msg = Eval(code, Event())
-        self._events.put(msg)
-        msg.event.wait()
+        req = Eval(code, Event())
+        self._events.put(req)
+        req.event.wait()
 
-        if msg.success:
-            return self._final_value(msg.result)
-        else:
-            raise JavaScriptError(**msg.error)
+        if req.success:
+            return self._final_value(req.result)
+
+        raise JavaScriptError(**(req.error or {}))
 
     def _eval(self, event_id: int, code: str) -> None:
         """
@@ -1011,16 +989,17 @@ class NodeEngine:
         pointer = _get_pointer(pointer)
 
         if not pointer.awaitable:
-            raise NodeEdgeValueError("Cannot await a non-awaitable pointer")
+            msg = "Cannot await a non-awaitable pointer"
+            raise NodeEdgeValueError(msg)
 
-        msg = Await(pointer.id, Event())
-        self._events.put(msg)
-        msg.event.wait()
+        req = Await(pointer.id, Event())
+        self._events.put(req)
+        req.event.wait()
 
-        if msg.success:
-            return self._final_value(msg.result)
-        else:
-            raise JavaScriptError(**msg.error)
+        if req.success:
+            return self._final_value(req.result)
+
+        raise JavaScriptError(**(req.error or {}))
 
     def _await(self, event_id: int, pointer_id: str) -> None:
         """
@@ -1045,6 +1024,30 @@ class NodeEngine:
             )
         )
 
+    def resolve(self, value: Any) -> Any:
+        """
+        Awaits the value if it is an awaitable pointer (typically, the return
+        value of an async JS function), otherwise returns it unchanged.
+
+        This makes it convenient to call JS functions without worrying about
+        whether they are async or not.
+
+        Parameters
+        ----------
+        value
+            Any value, potentially a pointer/proxy to a JS Promise
+        """
+
+        try:
+            pointer = _get_pointer(value)
+        except NodeEdgeTypeError:
+            return value
+
+        if pointer.awaitable:
+            return self.await_(pointer)
+
+        return value
+
     def import_from(self, module: str, name: str = "default") -> Any:
         """
         Imports a name from a JS module (by default, "default") and returns
@@ -1052,14 +1055,14 @@ class NodeEngine:
         etc.
         """
 
-        msg = Import(module, name, Event())
-        self._events.put(msg)
-        msg.event.wait()
+        req = Import(module, name, Event())
+        self._events.put(req)
+        req.event.wait()
 
-        if msg.success:
-            return self._final_value(msg.result)
-        else:
-            raise JavaScriptError(**msg.error)
+        if req.success:
+            return self._final_value(req.result)
+
+        raise JavaScriptError(**(req.error or {}))
 
     def _import(self, event_id: int, module: str, name: str) -> None:
         """
@@ -1098,21 +1101,21 @@ class NodeEngine:
 
         pointer = _get_pointer(pointer)
 
-        clean_args: List[Any] = _deep_point(args)  # noqa
-        msg = Call(pointer.id, clean_args, call_type, Event())
-        self._events.put(msg)
-        msg.event.wait()
+        clean_args: list[Any] = _deep_point(args)
+        req = Call(pointer.id, clean_args, call_type, Event())
+        self._events.put(req)
+        req.event.wait()
 
-        if msg.success:
+        if req.success:
             return CallOutput(
-                result=self._final_value(msg.result),
-                type=msg.result_type,
+                result=self._final_value(req.result),
+                type=req.result_type or "",
             )
-        else:
-            raise JavaScriptError(**msg.error)
+
+        raise JavaScriptError(**(req.error or {}))
 
     def _call(
-        self, pointer_id: str, args: List[Any], call_type: CallType, event_id: int
+        self, pointer_id: str, args: list[Any], call_type: CallType, event_id: int
     ) -> None:
         """
         Sending the call message to the other side (running here to be in the

@@ -21,6 +21,14 @@ with NodeEngine(package) as ne:
     print(axios.get("https://httpbin.org/robots.txt").data)
 ```
 
+By default, node-edge uses the `node` and `npm` binaries found in your `PATH`.
+If you don't have (or don't want) a system-wide Node installation, you can get a
+Node runtime bundled as a Python wheel:
+
+```bash
+pip install node-edge[node]
+```
+
 ## Documentation
 
 [✨ **Documentation is there** ✨](https://node-edge.rtfd.io)

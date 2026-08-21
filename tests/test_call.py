@@ -1,6 +1,6 @@
 import re
 
-from _pytest.python_api import raises
+import pytest
 
 from node_edge import JavaScriptError, NodeEdgeTypeError, NodeEngine
 
@@ -77,10 +77,10 @@ def test_call():
             == 48
         )
 
-        with raises(NodeEdgeTypeError):
+        with pytest.raises(NodeEdgeTypeError):
             do_something(object())
 
-        with raises(
+        with pytest.raises(
             JavaScriptError,
             match=re.compile(r"^fail:\nError: fail\n {4}at fail \(evalmachine.*"),
         ):

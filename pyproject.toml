@@ -1,31 +1,124 @@
-[tool.poetry]
+[project]
 name = "node-edge"
-version = "0.1.0"
+version = "1.0.0"
 description = "A tool to run Node code from Python"
-authors = ["Rémy Sanchez <remy.sanchez@hyperthese.net>"]
-license = "WTFPL"
+license = { text = "WTFPL" }
+authors = [
+    { name = "Rémy Sanchez", email = "remy.sanchez@hyperthese.net" },
+]
 readme = "README.md"
-packages = [{include = "node_edge", from = "src"}]
-repository = "https://github.com/ModelW/py-node-edge"
-homepage = "https://github.com/ModelW/py-node-edge"
-documentation = "https://node-edge.rtfd.io"
-
+requires-python = ">=3.10"
 keywords = ["node", "javascript", "binding"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX",
+    "Operating System :: MacOS",
+    "Programming Language :: JavaScript",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
+]
+dependencies = []
 
-[tool.poetry.dependencies]
-python = "^3.10"
+[project.optional-dependencies]
+# Bundles the Node.js runtime as a Python wheel, so that node-edge works
+# without a system-wide Node installation.
+node = ["nodejs-wheel-binaries>=20"]
 
-[tool.poetry.group.dev.dependencies]
-black = "^22.10.0"
-isort = "^5.10.1"
-ipython = "^8.7.0"
-pytest = "^7.2.0"
-coverage = "^6.5.0"
-monoformat = "^0.1.0b3"
+[project.urls]
+Homepage = "https://github.com/ModelW/py-node-edge"
+Repository = "https://github.com/ModelW/py-node-edge"
+Documentation = "https://node-edge.rtfd.io"
 
-[tool.isort]
-profile = "black"
+[dependency-groups]
+dev = [
+    "ipython>=8",
+    "ruff>=0.14",
+    "mypy>=1.19",
+]
+test = [
+    "pytest>=8",
+    "coverage>=7",
+]
+
+[tool.uv]
+default-groups = ["dev", "test"]
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/node_edge"]
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    # -- Core --
+    "E",  # pycodestyle (errors)
+    "W",  # pycodestyle (warnings)
+    "F",  # Pyflakes
+    "I",  # isort
+    "C90",  # McCabe Complexity
+    "D1",  # Mandatory docstrings
+    "S",  # Bandit
+
+    # -- Bonus --
+    "A",  # flake8-builtins
+    "B",  # flake8-bugbear
+    "DTZ",  # date/time zone
+    "T10",  # debugger
+    "EM",  # error messages
+    "EXE",  # executable
+    "G",  # logging
+    "UP",  # pyupgrade
+    "ASYNC",  # async
+    "INP",  # PEP 420
+    "T20",  # no print
+    "PT",  # pytest
+    "SLOT",  # slots
+    "TC",  # type checking blocks
+    "PTH",  # Use pathlib
+    "FIX",  # Don't allow not done stuff in code
+    "ERA",  # Don't comment code
+    "RUF",  # Ruff stuff
+]
+ignore = [
+    "D104",  # package __init__.py files don't need docstrings
+    "D105",  # magic methods are self-describing
+    "D106",  # nested Meta-style classes are pure configuration
+    "S603",  # every subprocess call here intentionally runs node/npm
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests: asserts are the point, fixtures shadow args.
+"tests/*" = ["S101", "D1", "ARG001"]
+# Sphinx configuration follows Sphinx conventions (copyright variable, etc).
+"doc/source/conf.py" = ["A001", "INP001", "D100"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["node_edge"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.mypy]
+files = ["src"]
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+# Optional dependency (node extra), untyped.
+module = ["nodejs_wheel.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+python_files = ["test_*.py"]
+addopts = ["-q", "-ra", "--tb=short"]

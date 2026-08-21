@@ -1,7 +1,10 @@
-from pytest import raises
+import pytest
 
 from node_edge import NodeEngine
-from node_edge.exceptions import *
+from node_edge.exceptions import (
+    JavaScriptError,
+    NodeEdgeValueError,
+)
 
 
 def test_await():
@@ -11,11 +14,11 @@ def test_await():
 
         promise = ne.eval("new Promise((resolve, reject) => reject(new Error('fail')))")
 
-        with raises(JavaScriptError):
+        with pytest.raises(JavaScriptError):
             ne.await_(promise)
 
         ne.eval("function yolo() {}")
         yolo = ne.eval("yolo")
 
-        with raises(NodeEdgeValueError):
+        with pytest.raises(NodeEdgeValueError):
             ne.await_(yolo)

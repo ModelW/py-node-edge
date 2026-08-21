@@ -1,4 +1,5 @@
-from node_edge import __version__ as release
+"""Sphinx configuration."""
+
 
 # -- Project information -----------------------------------------------------
 

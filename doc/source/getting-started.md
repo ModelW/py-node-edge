@@ -10,8 +10,21 @@ idioms and syntax so that you can use them almost as if they were native Python.
 Node Edge is available on PyPI and can be installed with pip:
 
 ```bash
-pip install node_edge
+pip install node-edge
 ```
+
+By default, it expects the `node` and `npm` binaries to be available in your
+`PATH`. If you'd rather not depend on a system-wide Node installation, the
+`node` extra pulls in [nodejs-wheel](https://pypi.org/project/nodejs-wheel/),
+which bundles the Node runtime as a Python wheel:
+
+```bash
+pip install node-edge[node]
+```
+
+When the bundled runtime is present, it takes precedence over the `PATH`, and
+you can always override both with the `node_bin`/`npm_bin` arguments of
+`NodeEngine`.
 
 ## Usage
 
