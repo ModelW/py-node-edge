@@ -10,7 +10,7 @@ jobs:
             - uses: actions/checkout@v7
 
             - name: Setup uv
-              uses: astral-sh/setup-uv@v10
+              uses: astral-sh/setup-uv@v10.0.1
 
             - name: Ruff check
               run: |
@@ -36,7 +36,7 @@ jobs:
                   node-version: ${{ matrix.node-version }}
 
             - name: Setup uv
-              uses: astral-sh/setup-uv@v10
+              uses: astral-sh/setup-uv@v10.0.1
               with:
                   python-version: ${{ matrix.python-version }}
 
@@ -50,7 +50,7 @@ jobs:
             - uses: actions/checkout@v7
 
             - name: Setup uv
-              uses: astral-sh/setup-uv@v10
+              uses: astral-sh/setup-uv@v10.0.1
 
             - name: Run tests with nodejs-wheel and no system Node
               run: |
